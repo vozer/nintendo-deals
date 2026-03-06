@@ -32,6 +32,7 @@ export async function savePreferences(prefs: Preferences): Promise<void> {
   await put(PREFS_KEY, JSON.stringify(prefs), {
     access: 'private',
     addRandomSuffix: false,
+    allowOverwrite: true,
     token: getToken(),
   });
 }
