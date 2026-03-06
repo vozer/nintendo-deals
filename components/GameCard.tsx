@@ -11,22 +11,37 @@ interface GameCardProps {
   onUnwatch: (gameId: string) => void;
 }
 
+const CAT_ES_TO_EN: Record<string, string> = {
+  'Acción': 'Action', 'Aventura': 'Adventure', 'Rol (RPG)': 'RPG',
+  'Puzle': 'Puzzle', 'Plataformas': 'Platformer', 'Arcade': 'Arcade',
+  'Deportes': 'Sports', 'Estrategia': 'Strategy', 'Simulación': 'Simulation',
+  'Carreras': 'Racing', 'Disparos (Shooter)': 'Shooter', 'Fiesta': 'Party',
+  'Lucha': 'Fighting', 'Música': 'Music', 'Tablero': 'Board Game',
+  'Otros': 'Other', 'Salud y forma física': 'Fitness',
+};
+
+function translateCat(cat: string): string {
+  return CAT_ES_TO_EN[cat] || cat;
+}
+
 const CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
-  'Acción': { bg: 'bg-green-50', text: 'text-green-600' },
-  'Aventura': { bg: 'bg-blue-50', text: 'text-blue-600' },
+  'Action': { bg: 'bg-green-50', text: 'text-green-600' },
+  'Adventure': { bg: 'bg-blue-50', text: 'text-blue-600' },
   'RPG': { bg: 'bg-indigo-50', text: 'text-indigo-600' },
-  'Rol (RPG)': { bg: 'bg-indigo-50', text: 'text-indigo-600' },
-  'Puzle': { bg: 'bg-purple-50', text: 'text-purple-600' },
-  'Plataformas': { bg: 'bg-orange-50', text: 'text-orange-600' },
+  'Puzzle': { bg: 'bg-purple-50', text: 'text-purple-600' },
+  'Platformer': { bg: 'bg-orange-50', text: 'text-orange-600' },
   'Arcade': { bg: 'bg-pink-50', text: 'text-pink-600' },
-  'Deportes': { bg: 'bg-emerald-50', text: 'text-emerald-600' },
-  'Estrategia': { bg: 'bg-cyan-50', text: 'text-cyan-600' },
-  'Simulación': { bg: 'bg-teal-50', text: 'text-teal-600' },
-  'Carreras': { bg: 'bg-yellow-50', text: 'text-yellow-700' },
-  'Disparos (Shooter)': { bg: 'bg-red-50', text: 'text-red-600' },
-  'Fiesta': { bg: 'bg-fuchsia-50', text: 'text-fuchsia-600' },
-  'Lucha': { bg: 'bg-rose-50', text: 'text-rose-600' },
-  'Música': { bg: 'bg-violet-50', text: 'text-violet-600' },
+  'Sports': { bg: 'bg-emerald-50', text: 'text-emerald-600' },
+  'Strategy': { bg: 'bg-cyan-50', text: 'text-cyan-600' },
+  'Simulation': { bg: 'bg-teal-50', text: 'text-teal-600' },
+  'Racing': { bg: 'bg-yellow-50', text: 'text-yellow-700' },
+  'Shooter': { bg: 'bg-red-50', text: 'text-red-600' },
+  'Party': { bg: 'bg-fuchsia-50', text: 'text-fuchsia-600' },
+  'Fighting': { bg: 'bg-rose-50', text: 'text-rose-600' },
+  'Music': { bg: 'bg-violet-50', text: 'text-violet-600' },
+  'Other': { bg: 'bg-gray-100', text: 'text-gray-600' },
+  'Board Game': { bg: 'bg-amber-50', text: 'text-amber-600' },
+  'Fitness': { bg: 'bg-lime-50', text: 'text-lime-600' },
 };
 
 const DEFAULT_COLOR = { bg: 'bg-gray-100', text: 'text-gray-600' };
@@ -64,20 +79,21 @@ export default function GameCard({ game, preferences, onHide, onWatch, onUnwatch
           <span className="text-xs text-gray-500 font-medium">{game.publisher}</span>
           {categories.length > 0 && <span className="text-gray-300">·</span>}
           {categories.map((cat) => {
-            const color = CATEGORY_COLORS[cat] || DEFAULT_COLOR;
+            const translated = translateCat(cat);
+            const color = CATEGORY_COLORS[translated] || DEFAULT_COLOR;
             return (
               <span
                 key={cat}
                 className={`text-[11px] font-semibold px-1.5 py-0.5 rounded ${color.bg} ${color.text}`}
               >
-                {cat}
+                {translated}
               </span>
             );
           })}
         </div>
 
         {game.excerpt && (
-          <p className="text-sm text-gray-500 leading-relaxed line-clamp-2">
+          <p className="text-sm text-gray-500 leading-relaxed line-clamp-3">
             {game.excerpt}
           </p>
         )}
