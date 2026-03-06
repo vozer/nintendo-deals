@@ -45,9 +45,10 @@ export async function PATCH(req: NextRequest) {
     await savePreferences(prefs);
     return NextResponse.json(prefs);
   } catch (error) {
-    console.error('Failed to update preferences:', error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('Failed to update preferences:', message);
     return NextResponse.json(
-      { error: 'Failed to update preferences' },
+      { error: 'Failed to update preferences', detail: message },
       { status: 500 },
     );
   }
