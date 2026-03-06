@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { fetchDeals } from '@/lib/nintendo-api';
 import { SortOption } from '@/lib/types';
 
+export const dynamic = 'force-dynamic';
+
 const VALID_SORTS: SortOption[] = ['discount', 'price_asc', 'price_desc', 'title', 'popularity'];
 
 export async function GET(req: NextRequest) {

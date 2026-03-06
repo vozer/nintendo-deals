@@ -22,7 +22,7 @@ A personal, password-protected web app to track Nintendo eShop deals on Switch. 
 git clone https://github.com/reglisund/nintendo-deals.git
 cd nintendo-deals
 cp .env.example .env.local
-# Edit .env.local with your password and Blob token
+# Edit .env.local with your password
 npm install
 npm run dev
 ```
@@ -31,34 +31,32 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Tech Stack
 
-Next.js 16 · TypeScript · Tailwind CSS · Vercel Blob · Nintendo Europe Solr API
+Next.js 16 · TypeScript · Tailwind CSS · localStorage · Nintendo Europe Solr API
 
 ## Deployment (Vercel)
 
 1. Import the repo into Vercel
 2. Set `ACCESS_PASSWORD` environment variable
-3. Create a Blob store and connect it to the project (auto-creates `BLOB_READ_WRITE_TOKEN`)
-4. Deploy — region `fra1` recommended for Europe
+3. Deploy — region `fra1` recommended for Europe
 
 ## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `ACCESS_PASSWORD` | Yes | Password to access the app |
-| `BLOB_READ_WRITE_TOKEN` | Yes | Vercel Blob token (auto-created when store is connected) |
 
 ## Architecture
 
 ```
 Nintendo Solr API ──→ /api/games ──→ DealsClient (React)
                                          │
-Vercel Blob ←──→ /api/preferences ←──────┘
+                  localStorage ←─────────┘ (preferences)
                                          │
                      /api/auth ←─────────┘
 ```
 
 - **Data source**: `searching.nintendo-europe.com/es/select` (Spanish market for EUR prices)
-- **Preferences**: Stored in Vercel Blob as a single `preferences.json` file
+- **Preferences**: Stored in browser localStorage (instant, consistent reads)
 - **Auth**: Cookie-based, password compared against `ACCESS_PASSWORD` env var
 - **Middleware**: Protects all routes except `/login` and `/api/auth`
 

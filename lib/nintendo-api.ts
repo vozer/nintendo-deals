@@ -39,7 +39,7 @@ export async function fetchDeals(options: {
   });
 
   const res = await fetch(`${NINTENDO_SOLR_URL}?${params}`, {
-    next: { revalidate: 0 },
+    cache: 'no-store',
   });
 
   if (!res.ok) {
