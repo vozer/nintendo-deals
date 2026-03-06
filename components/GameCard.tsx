@@ -1,14 +1,14 @@
 'use client';
 
 import { NintendoGame, Preferences } from '@/lib/types';
-import { useState } from 'react';
 
 interface GameCardProps {
   game: NintendoGame;
   preferences: Preferences;
   onHide: (gameId: string) => void;
   onWatch: (gameId: string, threshold: 5 | 10, title: string) => void;
-  onUnwatch: (gameId: string) => void;
+  hideLabel?: string;
+  onUnwatch?: (gameId: string) => void;
 }
 
 const CAT_ES_TO_EN: Record<string, string> = {
@@ -46,8 +46,7 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
 
 const DEFAULT_COLOR = { bg: 'bg-gray-100', text: 'text-gray-600' };
 
-export default function GameCard({ game, preferences, onHide, onWatch, onUnwatch }: GameCardProps) {
-  const [showWatchMenu, setShowWatchMenu] = useState(false);
+export default function GameCard({ game, preferences, onHide, onWatch, hideLabel = 'Hide', onUnwatch }: GameCardProps) {
   const watchEntry = preferences.watchGames[game.fs_id];
 
   const imageUrl = game.image_url_h2x1_s || game.image_url_h16x9_s || game.image_url_sq_s;
@@ -123,47 +122,31 @@ export default function GameCard({ game, preferences, onHide, onWatch, onUnwatch
             className="inline-flex items-center gap-1.5 bg-gray-100 text-gray-500 text-xs font-medium px-3 py-2 rounded-lg hover:bg-gray-200 transition-colors"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>
-            Hide
+            {hideLabel}
           </button>
 
-          <div className="relative">
-            <button
-              onClick={() => setShowWatchMenu(!showWatchMenu)}
-              className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg transition-colors ${
-                watchEntry
-                  ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                  : 'bg-amber-50 text-amber-600 hover:bg-amber-100'
-              }`}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill={watchEntry ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
-              {watchEntry ? `< ${watchEntry.threshold}€` : 'Watch'}
-            </button>
-
-            {showWatchMenu && (
-              <div className="absolute bottom-full left-0 mb-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 min-w-[120px]">
-                <button
-                  onClick={() => { onWatch(game.fs_id, 5, game.title); setShowWatchMenu(false); }}
-                  className="block w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 rounded-t-lg"
-                >
-                  Below 5 €
-                </button>
-                <button
-                  onClick={() => { onWatch(game.fs_id, 10, game.title); setShowWatchMenu(false); }}
-                  className="block w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
-                >
-                  Below 10 €
-                </button>
-                {watchEntry && (
-                  <button
-                    onClick={() => { onUnwatch(game.fs_id); setShowWatchMenu(false); }}
-                    className="block w-full text-left px-3 py-2 text-xs text-red-500 hover:bg-red-50 rounded-b-lg border-t border-gray-100"
-                  >
-                    Remove watch
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
+          <button
+            onClick={() => watchEntry?.threshold === 5 && onUnwatch ? onUnwatch(game.fs_id) : onWatch(game.fs_id, 5, game.title)}
+            className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-2 rounded-lg transition-colors ${
+              watchEntry?.threshold === 5
+                ? 'bg-amber-200 text-amber-800 hover:bg-amber-300'
+                : 'bg-amber-50 text-amber-600 hover:bg-amber-100'
+            }`}
+            title={watchEntry?.threshold === 5 ? 'Remove watch' : 'Watch for price below 5€'}
+          >
+            &lt; 5€
+          </button>
+          <button
+            onClick={() => watchEntry?.threshold === 10 && onUnwatch ? onUnwatch(game.fs_id) : onWatch(game.fs_id, 10, game.title)}
+            className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-2 rounded-lg transition-colors ${
+              watchEntry?.threshold === 10
+                ? 'bg-amber-200 text-amber-800 hover:bg-amber-300'
+                : 'bg-amber-50 text-amber-600 hover:bg-amber-100'
+            }`}
+            title={watchEntry?.threshold === 10 ? 'Remove watch' : 'Watch for price below 10€'}
+          >
+            &lt; 10€
+          </button>
         </div>
       </div>
     </div>
