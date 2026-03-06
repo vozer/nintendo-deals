@@ -1,36 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Nintendo Deals
 
-## Getting Started
+A personal, password-protected web app to track Nintendo eShop deals on Switch. Fetches live data from the Nintendo Europe Solr API, displays games with prices, discounts, and lets you hide or set price watch thresholds.
 
-First, run the development server:
+## Features
+
+| Feature | Description |
+|---------|-------------|
+| Live deals | 2000+ Nintendo Switch games on sale, fetched on demand |
+| Price filters | Pre-filtered to 0–14.99 €, digital-only, English language |
+| Hide games | Permanently hide games you're not interested in |
+| Price watch | Set < 5 € or < 10 € thresholds — game hides until price drops |
+| Tabs | Deals / Hidden / Watched tabs to manage preferences |
+| Search | Full-text search across game titles and descriptions |
+| Sort | By popularity, discount %, price (↑↓), or title (A-Z) |
+| Responsive | Mobile-first 1/2/3 column grid |
+| Password gate | Simple cookie-based auth via environment variable |
+
+## Quick Start
 
 ```bash
+git clone https://github.com/reglisund/nintendo-deals.git
+cd nintendo-deals
+cp .env.example .env.local
+# Edit .env.local with your password and Blob token
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Tech Stack
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Next.js 16 · TypeScript · Tailwind CSS · Vercel Blob · Nintendo Europe Solr API
 
-## Learn More
+## Deployment (Vercel)
 
-To learn more about Next.js, take a look at the following resources:
+1. Import the repo into Vercel
+2. Set `ACCESS_PASSWORD` environment variable
+3. Create a Blob store and connect it to the project (auto-creates `BLOB_READ_WRITE_TOKEN`)
+4. Deploy — region `fra1` recommended for Europe
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Environment Variables
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ACCESS_PASSWORD` | Yes | Password to access the app |
+| `BLOB_READ_WRITE_TOKEN` | Yes | Vercel Blob token (auto-created when store is connected) |
 
-## Deploy on Vercel
+## Architecture
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```
+Nintendo Solr API ──→ /api/games ──→ DealsClient (React)
+                                         │
+Vercel Blob ←──→ /api/preferences ←──────┘
+                                         │
+                     /api/auth ←─────────┘
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Data source**: `searching.nintendo-europe.com/es/select` (Spanish market for EUR prices)
+- **Preferences**: Stored in Vercel Blob as a single `preferences.json` file
+- **Auth**: Cookie-based, password compared against `ACCESS_PASSWORD` env var
+- **Middleware**: Protects all routes except `/login` and `/api/auth`
+
+## License
+
+MIT
