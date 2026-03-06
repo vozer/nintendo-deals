@@ -27,15 +27,11 @@ export async function fetchDeals(options: {
 }): Promise<GamesResponse> {
   const { sort = 'popularity', search, start = 0, rows = 48 } = options;
 
-  let fq = BASE_FILTER;
-  if (search) {
-    const escaped = search.replace(/[+\-&|!(){}[\]^"~*?:\\]/g, '\\$&');
-    fq += ` AND title:*${escaped}*`;
-  }
+  const q = search ? search.trim() : '*';
 
   const params = new URLSearchParams({
-    q: '*',
-    fq,
+    q,
+    fq: BASE_FILTER,
     sort: SORT_MAP[sort] || SORT_MAP.popularity,
     start: String(start),
     rows: String(rows),
