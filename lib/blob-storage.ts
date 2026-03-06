@@ -28,24 +28,12 @@ export async function getPreferences(): Promise<Preferences> {
   }
 }
 
-export async function savePreferences(prefs: Preferences): Promise<string> {
-  const blob = await put(PREFS_KEY, JSON.stringify(prefs), {
+export async function savePreferences(prefs: Preferences): Promise<void> {
+  await put(PREFS_KEY, JSON.stringify(prefs), {
     access: 'private',
     addRandomSuffix: false,
     allowOverwrite: true,
+    cacheControlMaxAge: 0,
     token: getToken(),
   });
-  return blob.url;
-}
-
-export async function getPreferencesFromUrl(url: string): Promise<Preferences> {
-  try {
-    const token = getToken();
-    const result = await blobGet(url, { token, access: 'private' });
-    if (!result) return { ...DEFAULT_PREFS };
-    const text = await new Response(result.stream).text();
-    return JSON.parse(text);
-  } catch {
-    return { ...DEFAULT_PREFS };
-  }
 }
