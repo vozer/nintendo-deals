@@ -1,4 +1,4 @@
-import { put, list } from '@vercel/blob';
+import { put, list, get as blobGet } from '@vercel/blob';
 import { Preferences } from './types';
 
 const PREFS_KEY = 'preferences.json';
@@ -14,11 +14,15 @@ const DEFAULT_PREFS: Preferences = {
 
 export async function getPreferences(): Promise<Preferences> {
   try {
-    const { blobs } = await list({ prefix: PREFS_KEY, limit: 1, token: getToken() });
+    const token = getToken();
+    const { blobs } = await list({ prefix: PREFS_KEY, limit: 1, token });
     if (blobs.length === 0) return { ...DEFAULT_PREFS };
-    const res = await fetch(blobs[0].url, { cache: 'no-store' });
-    if (!res.ok) return { ...DEFAULT_PREFS };
-    return await res.json();
+
+    const result = await blobGet(blobs[0].url, { token, access: 'private' });
+    if (!result) return { ...DEFAULT_PREFS };
+
+    const text = await new Response(result.stream).text();
+    return JSON.parse(text);
   } catch {
     return { ...DEFAULT_PREFS };
   }
@@ -26,7 +30,7 @@ export async function getPreferences(): Promise<Preferences> {
 
 export async function savePreferences(prefs: Preferences): Promise<void> {
   await put(PREFS_KEY, JSON.stringify(prefs), {
-    access: 'public',
+    access: 'private',
     addRandomSuffix: false,
     token: getToken(),
   });
