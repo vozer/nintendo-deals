@@ -1,0 +1,28 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { fetchDeals } from '@/lib/nintendo-api';
+import { SortOption } from '@/lib/types';
+
+const VALID_SORTS: SortOption[] = ['discount', 'price_asc', 'price_desc', 'title', 'popularity'];
+
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+
+  const sortParam = searchParams.get('sort') || 'popularity';
+  const sort: SortOption = VALID_SORTS.includes(sortParam as SortOption)
+    ? (sortParam as SortOption)
+    : 'popularity';
+  const search = searchParams.get('search') || undefined;
+  const start = Math.max(0, Number(searchParams.get('start') || 0));
+  const rows = Math.min(100, Math.max(1, Number(searchParams.get('rows') || 48)));
+
+  try {
+    const data = await fetchDeals({ sort, search, start, rows });
+    return NextResponse.json(data);
+  } catch (error) {
+    console.error('Failed to fetch Nintendo deals:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch deals from Nintendo' },
+      { status: 502 },
+    );
+  }
+}
