@@ -31,6 +31,7 @@ export async function getPreferences(): Promise<Preferences> {
 export async function savePreferences(prefs: Preferences): Promise<void> {
   await put(PREFS_KEY, JSON.stringify(prefs), {
     access: 'private',
+    contentType: 'application/json',
     addRandomSuffix: false,
     allowOverwrite: true,
     cacheControlMaxAge: 0,
