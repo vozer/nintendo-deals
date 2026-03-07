@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.0] - 2026-03-07
+
+### Added
+
+- **IGDB ratings** on game cards — critic, user, and combined scores displayed as color-coded badges (green >75, yellow 50-75, red <50)
+- **Sort by Rating** — orders games by IGDB combined score (descending)
+- **Sort by Best Value** — price ascending with rating as tiebreaker (cheapest highly-rated games first)
+- **Collections tab** — bundles, collections, and multi-game packs in their own tab (queried server-side from Nintendo Solr API)
+- **Sports tab** — sports category games in their own tab (queried server-side)
+- **< 2€ watch button** alongside existing < 5€ and < 10€ thresholds
+- **Content filtering** — hentai/dating titles auto-blocked from all views
+- **/api/ratings** endpoint — GET (public) and PUT (auth via `x-api-key`) for n8n workflow
+- **n8n workflow** (`VHlYChVKtFofIVdp`) — daily cron for IGDB rating lookup and Telegram price alerts
+- `lib/filters.ts` — game classification engine (deals/collections/sports/blocked)
+- `lib/ratings-storage.ts` — Vercel Blob CRUD for `ratings.json`
+
+### Changed
+
+- Header deal counter now shows only main-tab visible games (excluding collections, sports, hidden, watched)
+- Tabs expanded from 3 to 5: Deals | Collections | Sports | Hidden | Watched
+- Tab bar is horizontally scrollable on mobile
+- `Preferences.watchGames.threshold` type expanded from `5 | 10` to `2 | 5 | 10`
+- Middleware now allows `/api/ratings` and `/api/preferences` through without auth cookie (needed for n8n)
+- Collections/Sports fetch from Nintendo Solr API with tab-specific query filters (not client-side classification)
+
 ## [1.1.0] - 2026-03-07
 
 ### Fixed
