@@ -16,6 +16,7 @@ Personal Nintendo eShop deal tracker. Displays Switch games on sale in the Spani
 | Storage | Vercel Blob (private store) |
 | Data source | Nintendo Europe Solr API |
 | Ratings | IGDB API (via n8n daily cron) |
+| Media | Nintendo pages + IGDB fallback |
 | Alerts | Telegram bot (via n8n daily cron) |
 | Hosting | Vercel (fra1 region) |
 | Auth | Cookie-based password gate |
@@ -38,22 +39,27 @@ npm run dev
 | `app/api/games/` | Nintendo API proxy with search/sort/pagination/tab filters |
 | `app/api/preferences/` | Blob-backed preferences CRUD |
 | `app/api/ratings/` | Blob-backed ratings CRUD (GET public, PUT auth via x-api-key) |
+| `app/api/media/` | Blob-backed media CRUD (GET public, PUT auth via x-api-key) |
 | `app/login/` | Password login page |
-| `components/` | React components (GameCard, DealsClient, SearchBar, SortSelect) |
-| `lib/` | Shared utilities (types, API client, blob storage, ratings, filters) |
+| `components/` | React components (GameCard, GameDetailModal, DealsClient, SearchBar, SortSelect) |
+| `lib/` | Shared utilities (types, API client, blob/ratings/media storage, filters) |
+| `scripts/` | Automation scripts (media-backfill.py) |
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `middleware.ts` | Auth middleware — redirects unauthenticated users to /login (bypasses /api/ratings, /api/preferences) |
+| `middleware.ts` | Auth middleware — redirects unauthenticated users to /login (bypasses /api/ratings, /api/preferences, /api/media) |
 | `lib/nintendo-api.ts` | Solr query builder with base filters, sort mapping, and tab-specific queries |
 | `lib/blob-storage.ts` | Vercel Blob read/write for preferences.json |
 | `lib/ratings-storage.ts` | Vercel Blob read/write for ratings.json |
 | `lib/filters.ts` | Game classification: blocked (hentai/dating), collections, sports, deals |
-| `lib/types.ts` | TypeScript interfaces (NintendoGame, Preferences, GameRating, RatingsMap, etc.) |
-| `components/GameCard.tsx` | Game card with hide/watch buttons, rating badges, and category translation |
-| `components/DealsClient.tsx` | Main page: 5 tabs, grid, search, sort, optimistic updates, ratings integration |
+| `lib/media-storage.ts` | Vercel Blob read/write for media.json |
+| `lib/types.ts` | TypeScript interfaces (NintendoGame, Preferences, GameRating, GameMedia, MediaMap, etc.) |
+| `components/GameCard.tsx` | Game card with hide/watch buttons, rating badges, media indicators, IGDB link |
+| `components/GameDetailModal.tsx` | Fullscreen detail modal with screenshot carousel, YouTube embed, game info |
+| `components/DealsClient.tsx` | Main page: 5 tabs, grid, search, sort, optimistic updates, ratings/media integration |
+| `scripts/media-backfill.py` | Backfill media for all games: Nintendo scraping + IGDB fallback, incremental saves |
 | `vercel.json` | Vercel config: region, headers, build settings |
 
 ## Content Filtering
@@ -75,6 +81,17 @@ Collections and Sports tabs fetch directly from Nintendo Solr API with tab-speci
 - **Display**: Critic badge (🎬), User badge (👤), Combined badge (⭐) — color-coded green/yellow/red
 - **Sort**: "Rating ★" (by combined score) and "Best Value" (price + rating)
 - **Batch**: 100 unrated games per cron run
+
+## Media Gallery
+
+- **Storage**: `media.json` in Vercel Blob
+- **Primary**: Nintendo game page scraping (`_gItems.push` pattern) — official HD screenshots
+- **Fallback**: IGDB `/screenshots` + `/game_videos` endpoints
+- **Videos**: YouTube trailers from IGDB (Nintendo Limelight videos not embeddable — DNS/service issues)
+- **Frontend**: Click game tile → detail modal with screenshot carousel + YouTube embed + IGDB link
+- **Indicators**: Game tiles show screenshot count and trailer availability badges
+- **Backfill**: `scripts/media-backfill.py` — processes all games, incremental saves every 50 games
+- **Coverage**: ~99% of games have screenshots, ~71% have YouTube trailers
 
 ## Telegram Alerts
 
@@ -122,9 +139,17 @@ Collections and Sports tabs fetch directly from Nintendo Solr API with tab-speci
 - Descriptions: Spanish (from ES Solr endpoint — trade-off for correct prices)
 - Preferences stored in Vercel Blob (private store, single `preferences.json` file)
 - Ratings stored in Vercel Blob (private store, single `ratings.json` file)
+- Media stored in Vercel Blob (private store, single `media.json` file)
 - Blob has ~2s eventual consistency on overwrites; reads use direct URL fetch with cache-busting
 - Optimistic updates: Client updates state immediately, persists to Blob in background
 - Watch thresholds: 2€, 5€, 10€
+- "Thinking about it" list: games bookmarked for later, hidden from Deals tab
+- Tabs: Deals | Collections | Sports | Thinking | Hidden | Watched
+- Infinite scroll via IntersectionObserver (no "Load more" button)
+- Header deal counter shows filtered main-page count (excludes hidden, watched, thinking)
+- Rating badges show review count; ≤1 user review shows ⚠ warning
+- Sort by rating/value penalizes games with ≤1 user review
+- IGDB matching uses `title_master_s` from Nintendo API (English titles) for better coverage
 
 ## Critical Rules
 
@@ -133,7 +158,7 @@ Collections and Sports tabs fetch directly from Nintendo Solr API with tab-speci
 3. **Verify builds** — `npx tsc --noEmit` before deploying
 4. **Test API changes** — `curl` against deployed endpoints
 5. **Categories**: Always add new ES→EN translations to `CAT_ES_TO_EN` in GameCard.tsx
-6. **Ratings API**: PUT requires `x-api-key` header matching `RATINGS_API_KEY` env var
+6. **Ratings/Media API**: PUT requires `x-api-key` header matching `RATINGS_API_KEY` env var
 7. **n8n workflow**: Uses node names in connections (not IDs)
 
 ## See Also

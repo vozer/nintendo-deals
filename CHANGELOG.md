@@ -4,6 +4,47 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.4.0] - 2026-03-08
+
+### Added
+
+- **Infinite scroll** — replaces "Load more" button with IntersectionObserver auto-loading across all tabs
+- **"Thinking about it" tab** — bookmark games to reconsider later; games hidden from Deals tab while in list
+- **Rating review count** — shown in parentheses on rating badges (e.g., "🎬 85 (12)")
+- **Low review warning** — games with ≤1 user review show ⚠ orange warning badge
+
+### Changed
+
+- **Trailer auto-play** — detail modal opens with YouTube trailer first (was screenshots), toggle tabs moved below video area
+- **Deal counter** — header shows filtered main-page count (after hiding/watching/thinking), not raw API total
+- **Sort order** — rating/value sorts now penalize games with ≤1 user review (sorted after reliable ratings)
+- **IGDB matching** — uses `title_master_s` (English title) from Nintendo API for better matching; 28 new matches (2,253→2,281, 91.1% coverage)
+- Tabs expanded: Deals | Collections | Sports | Thinking | Hidden | Watched
+
+## [1.3.0] - 2026-03-07
+
+### Added
+
+- **Media Gallery Modal** — click any game tile to open a fullscreen detail modal with:
+  - Screenshot carousel with navigation arrows and thumbnail strip
+  - YouTube trailer embed (toggle between screenshots and trailer)
+  - Game info panel (title, publisher, price, rating, description)
+  - External links: Nintendo eShop, IGDB, YouTube
+- **Media indicators** on game tiles — camera icon with screenshot count, play icon for trailer availability
+- **IGDB link** — purple IGDB button on game cards for games with IGDB data
+- **Media storage** — `media.json` in Vercel Blob with screenshots/videos per game
+- `/api/media` endpoint — GET (public) and PUT (auth) for media data
+- `lib/media-storage.ts` — Vercel Blob CRUD for media data
+- `components/GameDetailModal.tsx` — full-featured detail modal component
+- `scripts/media-backfill.py` — standalone backfill script for Nintendo page scraping + IGDB fallback
+
+### Changed
+
+- Game tiles now respond to clicks (open detail modal) with hover brightness effect
+- Nintendo screenshots used as primary media source (official HD), IGDB as fallback
+- YouTube trailers from IGDB embedded directly (Limelight/Cloudinary videos from Nintendo not embeddable)
+- Middleware updated to allow `/api/media` through without auth cookie
+
 ## [1.2.1] - 2026-03-07
 
 ### Fixed

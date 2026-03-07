@@ -10,6 +10,7 @@ function getToken(): string | undefined {
 const DEFAULT_PREFS: Preferences = {
   hiddenGames: [],
   watchGames: {},
+  thinkingAbout: [],
 };
 
 export async function getPreferences(): Promise<Preferences> {
