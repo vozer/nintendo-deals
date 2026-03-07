@@ -1,4 +1,4 @@
-import { put, head } from '@vercel/blob';
+import { put, get as blobGet } from '@vercel/blob';
 import { RatingsMap } from './types';
 
 const RATINGS_KEY = 'ratings.json';
@@ -10,15 +10,10 @@ function getToken(): string | undefined {
 export async function getRatings(): Promise<RatingsMap> {
   try {
     const token = getToken();
-    const meta = await head(RATINGS_KEY, { token });
-    if (!meta) return {};
-
-    const res = await fetch(`${meta.url}?t=${Date.now()}`, {
-      cache: 'no-store',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) return {};
-    return await res.json();
+    const result = await blobGet(RATINGS_KEY, { access: 'private', token });
+    if (!result || result.statusCode !== 200) return {};
+    const text = await new Response(result.stream).text();
+    return JSON.parse(text) as RatingsMap;
   } catch {
     return {};
   }

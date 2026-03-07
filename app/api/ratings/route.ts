@@ -6,7 +6,9 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   try {
     const ratings = await getRatings();
-    return NextResponse.json(ratings);
+    return NextResponse.json(ratings, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
   } catch (error) {
     console.error('Failed to fetch ratings:', error);
     return NextResponse.json({}, { status: 500 });

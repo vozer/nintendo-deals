@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.1] - 2026-03-07
+
+### Fixed
+
+- **Blob storage reads failing** — switched from `head()` + manual `fetch()` to SDK `get()` with `access: 'private'` for both `ratings-storage.ts` and `blob-storage.ts`, fixing intermittent 0-result reads
+- **Ratings API caching** — added `Cache-Control: no-store, max-age=0` header to GET `/api/ratings` to prevent Vercel edge caching stale data
+- **RATINGS_API_KEY env var** — re-set on Vercel without trailing newline that was causing 401 Unauthorized on PUT
+
+### Changed
+
+- n8n workflow (`VHlYChVKtFofIVdp`) now includes a Manual Trigger node alongside the Daily 6am schedule for on-demand testing
+
 ## [1.2.0] - 2026-03-07
 
 ### Added
@@ -17,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Content filtering** — hentai/dating titles auto-blocked from all views
 - **/api/ratings** endpoint — GET (public) and PUT (auth via `x-api-key`) for n8n workflow
 - **n8n workflow** (`VHlYChVKtFofIVdp`) — daily cron for IGDB rating lookup and Telegram price alerts
+- **Telegram bot** (`@nintendo_deals2_bot`) — sends price alerts when watched games drop below threshold
 - `lib/filters.ts` — game classification engine (deals/collections/sports/blocked)
 - `lib/ratings-storage.ts` — Vercel Blob CRUD for `ratings.json`
 

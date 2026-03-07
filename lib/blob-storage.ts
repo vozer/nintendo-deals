@@ -1,4 +1,4 @@
-import { put, head } from '@vercel/blob';
+import { put, get as blobGet } from '@vercel/blob';
 import { Preferences } from './types';
 
 const PREFS_KEY = 'preferences.json';
@@ -15,15 +15,10 @@ const DEFAULT_PREFS: Preferences = {
 export async function getPreferences(): Promise<Preferences> {
   try {
     const token = getToken();
-    const meta = await head(PREFS_KEY, { token });
-    if (!meta) return { ...DEFAULT_PREFS };
-
-    const res = await fetch(`${meta.url}?t=${Date.now()}`, {
-      cache: 'no-store',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) return { ...DEFAULT_PREFS };
-    return await res.json();
+    const result = await blobGet(PREFS_KEY, { access: 'private', token });
+    if (!result || result.statusCode !== 200) return { ...DEFAULT_PREFS };
+    const text = await new Response(result.stream).text();
+    return JSON.parse(text) as Preferences;
   } catch {
     return { ...DEFAULT_PREFS };
   }
