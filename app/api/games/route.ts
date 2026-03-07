@@ -20,7 +20,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const serverSort = SERVER_SORT_MAP[sort] || sort;
-    const data = await fetchDeals({ sort: serverSort, search, start, rows });
+    const tab = searchParams.get('tab') || undefined;
+    const data = await fetchDeals({ sort: serverSort, search, start, rows, tab });
     return NextResponse.json(data);
   } catch (error) {
     console.error('Failed to fetch Nintendo deals:', error);

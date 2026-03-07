@@ -26,14 +26,23 @@ export async function fetchDeals(options: {
   search?: string;
   start?: number;
   rows?: number;
+  tab?: string;
 }): Promise<GamesResponse> {
-  const { sort = 'popularity', search, start = 0, rows = 48 } = options;
+  const { sort = 'popularity', search, start = 0, rows = 48, tab } = options;
 
   const q = search ? search.trim() : '*';
 
+  let fq = BASE_FILTER;
+
+  if (tab === 'sports') {
+    fq += ' AND pretty_game_categories_txt:Deportes';
+  } else if (tab === 'collections') {
+    // No server-side filter — handled by search query for title words
+  }
+
   const params = new URLSearchParams({
-    q,
-    fq: BASE_FILTER,
+    q: tab === 'collections' && !search ? '(collection OR bundle OR "in 1" OR "mega pack")' : q,
+    fq,
     sort: SORT_MAP[sort] || SORT_MAP.popularity,
     start: String(start),
     rows: String(rows),

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { NintendoGame, Preferences, SortOption, RatingsMap } from '@/lib/types';
-import { classifyGames, GameClassification } from '@/lib/filters';
+import { classifyGame } from '@/lib/filters';
 import GameCard from './GameCard';
 import SearchBar from './SearchBar';
 import SortSelect from './SortSelect';
@@ -10,8 +10,12 @@ import SortSelect from './SortSelect';
 type ViewTab = 'deals' | 'collections' | 'sports' | 'hidden' | 'watched';
 
 export default function DealsClient() {
-  const [games, setGames] = useState<NintendoGame[]>([]);
-  const [total, setTotal] = useState(0);
+  const [allGames, setAllGames] = useState<NintendoGame[]>([]);
+  const [allTotal, setAllTotal] = useState(0);
+  const [collectionGames, setCollectionGames] = useState<NintendoGame[]>([]);
+  const [collectionTotal, setCollectionTotal] = useState(0);
+  const [sportsGames, setSportsGames] = useState<NintendoGame[]>([]);
+  const [sportsTotal, setSportsTotal] = useState(0);
   const [preferences, setPreferences] = useState<Preferences>({ hiddenGames: [], watchGames: {} });
   const [ratings, setRatings] = useState<RatingsMap>({});
   const [sort, setSort] = useState<SortOption>('popularity');
@@ -20,30 +24,73 @@ export default function DealsClient() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<ViewTab>('deals');
+  const [collectionsLoaded, setCollectionsLoaded] = useState(false);
+  const [sportsLoaded, setSportsLoaded] = useState(false);
 
-  const fetchGames = useCallback(async (start = 0, append = false) => {
+  const fetchMainGames = useCallback(async (start = 0, append = false) => {
     if (!append) setLoading(true);
     else setLoadingMore(true);
 
     try {
-      const params = new URLSearchParams({ sort: sort === 'rating' || sort === 'value' ? 'popularity' : sort, rows: '48', start: String(start) });
+      const serverSort = sort === 'rating' || sort === 'value' ? 'popularity' : sort;
+      const params = new URLSearchParams({ sort: serverSort, rows: '48', start: String(start) });
       if (search) params.set('search', search);
       const res = await fetch(`/api/games?${params}`);
       if (!res.ok) throw new Error('Failed to fetch');
       const data = await res.json();
 
       if (append) {
-        setGames((prev) => [...prev, ...data.games]);
+        setAllGames((prev) => [...prev, ...data.games]);
       } else {
-        setGames(data.games);
+        setAllGames(data.games);
       }
-      setTotal(data.total);
+      setAllTotal(data.total);
       setError('');
     } catch {
       setError('Failed to load games from Nintendo. Try refreshing.');
     } finally {
       setLoading(false);
       setLoadingMore(false);
+    }
+  }, [sort, search]);
+
+  const fetchCollections = useCallback(async (start = 0, append = false) => {
+    try {
+      const serverSort = sort === 'rating' || sort === 'value' ? 'popularity' : sort;
+      const params = new URLSearchParams({ sort: serverSort, rows: '48', start: String(start), tab: 'collections' });
+      if (search) params.set('search', search);
+      const res = await fetch(`/api/games?${params}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (append) {
+        setCollectionGames((prev) => [...prev, ...data.games]);
+      } else {
+        setCollectionGames(data.games);
+      }
+      setCollectionTotal(data.total);
+      setCollectionsLoaded(true);
+    } catch {
+      // silent
+    }
+  }, [sort, search]);
+
+  const fetchSports = useCallback(async (start = 0, append = false) => {
+    try {
+      const serverSort = sort === 'rating' || sort === 'value' ? 'popularity' : sort;
+      const params = new URLSearchParams({ sort: serverSort, rows: '48', start: String(start), tab: 'sports' });
+      if (search) params.set('search', search);
+      const res = await fetch(`/api/games?${params}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (append) {
+        setSportsGames((prev) => [...prev, ...data.games]);
+      } else {
+        setSportsGames(data.games);
+      }
+      setSportsTotal(data.total);
+      setSportsLoaded(true);
+    } catch {
+      // silent
     }
   }, [sort, search]);
 
@@ -71,9 +118,20 @@ export default function DealsClient() {
     }
   }, []);
 
-  useEffect(() => { fetchGames(); }, [fetchGames]);
+  useEffect(() => { fetchMainGames(); }, [fetchMainGames]);
   useEffect(() => { fetchPreferences(); }, [fetchPreferences]);
   useEffect(() => { fetchRatings(); }, [fetchRatings]);
+
+  useEffect(() => {
+    if (activeTab === 'collections' && !collectionsLoaded) fetchCollections();
+    if (activeTab === 'sports' && !sportsLoaded) fetchSports();
+  }, [activeTab, collectionsLoaded, sportsLoaded, fetchCollections, fetchSports]);
+
+  useEffect(() => {
+    if (collectionsLoaded) fetchCollections();
+    if (sportsLoaded) fetchSports();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sort, search]);
 
   function persistPrefs(prefs: Preferences) {
     fetch('/api/preferences', {
@@ -125,7 +183,16 @@ export default function DealsClient() {
     window.location.href = '/login';
   }
 
-  const classified = useMemo(() => classifyGames(games), [games]);
+  const dealsGames = useMemo(() => {
+    return allGames.filter((game) => {
+      const cls = classifyGame(game);
+      if (cls !== 'deals') return false;
+      if (preferences.hiddenGames.includes(game.fs_id)) return false;
+      const w = preferences.watchGames[game.fs_id];
+      if (w && game.price_discounted_f >= w.threshold) return false;
+      return true;
+    });
+  }, [allGames, preferences]);
 
   const hiddenCount = preferences.hiddenGames.length;
   const watchedCount = Object.keys(preferences.watchGames).length;
@@ -133,34 +200,29 @@ export default function DealsClient() {
   const tabGames = useMemo((): NintendoGame[] => {
     switch (activeTab) {
       case 'deals':
-        return classified.deals.filter((game) => {
-          if (preferences.hiddenGames.includes(game.fs_id)) return false;
-          const w = preferences.watchGames[game.fs_id];
-          if (w && game.price_discounted_f >= w.threshold) return false;
-          return true;
-        });
+        return dealsGames;
       case 'collections':
-        return classified.collections.filter((game) => {
-          if (preferences.hiddenGames.includes(game.fs_id)) return false;
-          const w = preferences.watchGames[game.fs_id];
-          if (w && game.price_discounted_f >= w.threshold) return false;
+        return collectionGames.filter((g) => {
+          if (preferences.hiddenGames.includes(g.fs_id)) return false;
+          const w = preferences.watchGames[g.fs_id];
+          if (w && g.price_discounted_f >= w.threshold) return false;
           return true;
         });
       case 'sports':
-        return classified.sports.filter((game) => {
-          if (preferences.hiddenGames.includes(game.fs_id)) return false;
-          const w = preferences.watchGames[game.fs_id];
-          if (w && game.price_discounted_f >= w.threshold) return false;
+        return sportsGames.filter((g) => {
+          if (preferences.hiddenGames.includes(g.fs_id)) return false;
+          const w = preferences.watchGames[g.fs_id];
+          if (w && g.price_discounted_f >= w.threshold) return false;
           return true;
         });
       case 'hidden':
-        return games.filter((g) => preferences.hiddenGames.includes(g.fs_id));
+        return allGames.filter((g) => preferences.hiddenGames.includes(g.fs_id));
       case 'watched':
-        return games.filter((g) => g.fs_id in preferences.watchGames);
+        return allGames.filter((g) => g.fs_id in preferences.watchGames);
       default:
         return [];
     }
-  }, [activeTab, classified, games, preferences]);
+  }, [activeTab, dealsGames, collectionGames, sportsGames, allGames, preferences]);
 
   const sortedGames = useMemo((): NintendoGame[] => {
     if (sort !== 'rating' && sort !== 'value') return tabGames;
@@ -189,17 +251,11 @@ export default function DealsClient() {
     return sorted;
   }, [tabGames, sort, ratings]);
 
-  const dealsCount = useMemo(() => {
-    return classified.deals.filter((game) => {
-      if (preferences.hiddenGames.includes(game.fs_id)) return false;
-      const w = preferences.watchGames[game.fs_id];
-      if (w && game.price_discounted_f >= w.threshold) return false;
-      return true;
-    }).length;
-  }, [classified.deals, preferences]);
+  const currentTotal = activeTab === 'collections' ? collectionTotal : activeTab === 'sports' ? sportsTotal : allTotal;
+  const currentGames = activeTab === 'collections' ? collectionGames : activeTab === 'sports' ? sportsGames : allGames;
 
   const TABS: { id: ViewTab; label: string; count?: number }[] = [
-    { id: 'deals', label: 'Deals', count: dealsCount },
+    { id: 'deals', label: 'Deals', count: dealsGames.length },
     { id: 'collections', label: 'Collections' },
     { id: 'sports', label: 'Sports' },
     { id: 'hidden', label: 'Hidden', count: hiddenCount },
@@ -212,7 +268,7 @@ export default function DealsClient() {
         <h1 className="text-white font-bold text-lg sm:text-xl tracking-tight">Nintendo Deals</h1>
         <div className="flex items-center gap-3">
           <span className="bg-white/15 text-white text-xs font-semibold px-3 py-1 rounded-full">
-            {dealsCount.toLocaleString()} deals
+            {dealsGames.length.toLocaleString()} deals
           </span>
           <button onClick={handleLogout} className="text-white/70 hover:text-white transition-colors" title="Logout">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
@@ -254,7 +310,7 @@ export default function DealsClient() {
       </div>
 
       <main className="flex-1 px-4 sm:px-8 py-6">
-        {loading ? (
+        {loading && activeTab === 'deals' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="bg-white rounded-2xl overflow-hidden animate-pulse">
@@ -271,7 +327,7 @@ export default function DealsClient() {
         ) : error ? (
           <div className="text-center py-20">
             <p className="text-red-500 text-sm">{error}</p>
-            <button onClick={() => fetchGames()} className="mt-4 text-sm text-[#E60012] font-medium hover:underline">
+            <button onClick={() => fetchMainGames()} className="mt-4 text-sm text-[#E60012] font-medium hover:underline">
               Try again
             </button>
           </div>
@@ -302,14 +358,19 @@ export default function DealsClient() {
               ))}
             </div>
 
-            {activeTab === 'deals' && games.length < total && (
+            {(activeTab === 'deals' || activeTab === 'collections' || activeTab === 'sports') &&
+             currentGames.length < currentTotal && (
               <div className="flex justify-center mt-8">
                 <button
-                  onClick={() => fetchGames(games.length, true)}
+                  onClick={() => {
+                    if (activeTab === 'collections') fetchCollections(collectionGames.length, true);
+                    else if (activeTab === 'sports') fetchSports(sportsGames.length, true);
+                    else fetchMainGames(allGames.length, true);
+                  }}
                   disabled={loadingMore}
                   className="px-6 py-2.5 bg-white text-sm font-medium text-gray-700 rounded-xl hover:bg-gray-100 transition-colors disabled:opacity-50"
                 >
-                  {loadingMore ? 'Loading...' : `Load more (${games.length} of ${total})`}
+                  {loadingMore ? 'Loading...' : `Load more (${currentGames.length} of ${currentTotal})`}
                 </button>
               </div>
             )}
