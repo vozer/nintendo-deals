@@ -1,13 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { NintendoGame, Preferences, SortOption, RatingsMap } from '@/lib/types';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { NintendoGame, Preferences, SortOption, RatingsMap, MediaMap } from '@/lib/types';
 import { classifyGame } from '@/lib/filters';
 import GameCard from './GameCard';
+import GameDetailModal from './GameDetailModal';
 import SearchBar from './SearchBar';
 import SortSelect from './SortSelect';
 
-type ViewTab = 'deals' | 'collections' | 'sports' | 'hidden' | 'watched';
+type ViewTab = 'deals' | 'collections' | 'sports' | 'thinking' | 'hidden' | 'watched';
+
+const DEFAULT_PREFS: Preferences = { hiddenGames: [], watchGames: {}, thinkingAbout: [] };
 
 export default function DealsClient() {
   const [allGames, setAllGames] = useState<NintendoGame[]>([]);
@@ -16,8 +19,10 @@ export default function DealsClient() {
   const [collectionTotal, setCollectionTotal] = useState(0);
   const [sportsGames, setSportsGames] = useState<NintendoGame[]>([]);
   const [sportsTotal, setSportsTotal] = useState(0);
-  const [preferences, setPreferences] = useState<Preferences>({ hiddenGames: [], watchGames: {} });
+  const [preferences, setPreferences] = useState<Preferences>(DEFAULT_PREFS);
   const [ratings, setRatings] = useState<RatingsMap>({});
+  const [media, setMedia] = useState<MediaMap>({});
+  const [detailGame, setDetailGame] = useState<NintendoGame | null>(null);
   const [sort, setSort] = useState<SortOption>('popularity');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -26,6 +31,7 @@ export default function DealsClient() {
   const [activeTab, setActiveTab] = useState<ViewTab>('deals');
   const [collectionsLoaded, setCollectionsLoaded] = useState(false);
   const [sportsLoaded, setSportsLoaded] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement>(null);
 
   const fetchMainGames = useCallback(async (start = 0, append = false) => {
     if (!append) setLoading(true);
@@ -99,7 +105,7 @@ export default function DealsClient() {
       const res = await fetch('/api/preferences');
       if (res.ok) {
         const data = await res.json();
-        setPreferences(data);
+        setPreferences({ ...DEFAULT_PREFS, ...data });
       }
     } catch {
       // continue without preferences
@@ -118,9 +124,22 @@ export default function DealsClient() {
     }
   }, []);
 
+  const fetchMedia = useCallback(async () => {
+    try {
+      const res = await fetch('/api/media');
+      if (res.ok) {
+        const data = await res.json();
+        setMedia(data);
+      }
+    } catch {
+      // continue without media
+    }
+  }, []);
+
   useEffect(() => { fetchMainGames(); }, [fetchMainGames]);
   useEffect(() => { fetchPreferences(); }, [fetchPreferences]);
   useEffect(() => { fetchRatings(); }, [fetchRatings]);
+  useEffect(() => { fetchMedia(); }, [fetchMedia]);
 
   useEffect(() => {
     if (activeTab === 'collections' && !collectionsLoaded) fetchCollections();
@@ -133,12 +152,43 @@ export default function DealsClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sort, search]);
 
+  // Infinite scroll
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0].isIntersecting || loadingMore || loading) return;
+        const canLoadMore =
+          (activeTab === 'deals' && allGames.length < allTotal) ||
+          (activeTab === 'collections' && collectionGames.length < collectionTotal) ||
+          (activeTab === 'sports' && sportsGames.length < sportsTotal);
+        if (!canLoadMore) return;
+
+        if (activeTab === 'collections') fetchCollections(collectionGames.length, true);
+        else if (activeTab === 'sports') fetchSports(sportsGames.length, true);
+        else fetchMainGames(allGames.length, true);
+      },
+      { rootMargin: '400px' },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [
+    activeTab, loadingMore, loading,
+    allGames.length, allTotal,
+    collectionGames.length, collectionTotal,
+    sportsGames.length, sportsTotal,
+    fetchMainGames, fetchCollections, fetchSports,
+  ]);
+
   function persistPrefs(prefs: Preferences) {
     fetch('/api/preferences', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(prefs),
-    }).catch(() => { /* silent — optimistic UI is authoritative */ });
+    }).catch(() => {});
   }
 
   function updatePrefs(updater: (prev: Preferences) => Preferences) {
@@ -178,6 +228,15 @@ export default function DealsClient() {
     });
   }
 
+  function handleThink(gameId: string) {
+    updatePrefs((prev) => ({
+      ...prev,
+      thinkingAbout: prev.thinkingAbout.includes(gameId)
+        ? prev.thinkingAbout.filter((id) => id !== gameId)
+        : [...prev.thinkingAbout, gameId],
+    }));
+  }
+
   async function handleLogout() {
     await fetch('/api/auth', { method: 'DELETE' });
     window.location.href = '/login';
@@ -188,6 +247,7 @@ export default function DealsClient() {
       const cls = classifyGame(game);
       if (cls !== 'deals') return false;
       if (preferences.hiddenGames.includes(game.fs_id)) return false;
+      if (preferences.thinkingAbout?.includes(game.fs_id)) return false;
       const w = preferences.watchGames[game.fs_id];
       if (w && game.price_discounted_f >= w.threshold) return false;
       return true;
@@ -196,6 +256,7 @@ export default function DealsClient() {
 
   const hiddenCount = preferences.hiddenGames.length;
   const watchedCount = Object.keys(preferences.watchGames).length;
+  const thinkingCount = preferences.thinkingAbout?.length || 0;
 
   const tabGames = useMemo((): NintendoGame[] => {
     switch (activeTab) {
@@ -215,6 +276,8 @@ export default function DealsClient() {
           if (w && g.price_discounted_f >= w.threshold) return false;
           return true;
         });
+      case 'thinking':
+        return allGames.filter((g) => preferences.thinkingAbout?.includes(g.fs_id));
       case 'hidden':
         return allGames.filter((g) => preferences.hiddenGames.includes(g.fs_id));
       case 'watched':
@@ -230,34 +293,59 @@ export default function DealsClient() {
     const sorted = [...tabGames];
     if (sort === 'rating') {
       sorted.sort((a, b) => {
-        const ra = ratings[a.fs_id]?.total_rating ?? -1;
-        const rb = ratings[b.fs_id]?.total_rating ?? -1;
-        return rb - ra;
+        const ra = ratings[a.fs_id];
+        const rb = ratings[b.fs_id];
+        const scoreA = ra?.total_rating ?? -1;
+        const scoreB = rb?.total_rating ?? -1;
+
+        const reliableA = scoreA >= 0 && (ra?.rating_count ?? 0) > 1;
+        const reliableB = scoreB >= 0 && (rb?.rating_count ?? 0) > 1;
+        if (reliableA && !reliableB) return -1;
+        if (!reliableA && reliableB) return 1;
+
+        const hasA = scoreA >= 0;
+        const hasB = scoreB >= 0;
+        if (hasA && !hasB) return -1;
+        if (!hasA && hasB) return 1;
+
+        return scoreB - scoreA;
       });
     } else {
       sorted.sort((a, b) => {
-        const ra = ratings[a.fs_id]?.total_rating ?? -1;
-        const rb = ratings[b.fs_id]?.total_rating ?? -1;
-        const hasRatingA = ra >= 0;
-        const hasRatingB = rb >= 0;
-        if (hasRatingA && !hasRatingB) return -1;
-        if (!hasRatingA && hasRatingB) return 1;
-        if (!hasRatingA && !hasRatingB) return a.price_discounted_f - b.price_discounted_f;
+        const ra = ratings[a.fs_id];
+        const rb = ratings[b.fs_id];
+        const scoreA = ra?.total_rating ?? -1;
+        const scoreB = rb?.total_rating ?? -1;
+        const hasA = scoreA >= 0;
+        const hasB = scoreB >= 0;
+        const reliableA = hasA && (ra?.rating_count ?? 0) > 1;
+        const reliableB = hasB && (rb?.rating_count ?? 0) > 1;
+
+        if (reliableA && !reliableB) return -1;
+        if (!reliableA && reliableB) return 1;
+        if (!hasA && !hasB) return a.price_discounted_f - b.price_discounted_f;
+
         const priceCompare = a.price_discounted_f - b.price_discounted_f;
         if (priceCompare !== 0) return priceCompare;
-        return rb - ra;
+        return scoreB - scoreA;
       });
     }
     return sorted;
   }, [tabGames, sort, ratings]);
 
-  const currentTotal = activeTab === 'collections' ? collectionTotal : activeTab === 'sports' ? sportsTotal : allTotal;
-  const currentGames = activeTab === 'collections' ? collectionGames : activeTab === 'sports' ? sportsGames : allGames;
+  const canLoadMore =
+    (activeTab === 'deals' || activeTab === 'collections' || activeTab === 'sports') &&
+    (() => {
+      if (activeTab === 'collections') return collectionGames.length < collectionTotal;
+      if (activeTab === 'sports') return sportsGames.length < sportsTotal;
+      return allGames.length < allTotal;
+    })();
 
   const TABS: { id: ViewTab; label: string; count?: number }[] = [
     { id: 'deals', label: 'Deals', count: dealsGames.length },
     { id: 'collections', label: 'Collections' },
     { id: 'sports', label: 'Sports' },
+    { id: 'thinking', label: 'Thinking', count: thinkingCount },
     { id: 'hidden', label: 'Hidden', count: hiddenCount },
     { id: 'watched', label: 'Watched', count: watchedCount },
   ];
@@ -336,6 +424,7 @@ export default function DealsClient() {
             <p className="text-gray-400 text-sm">
               {activeTab === 'hidden' ? 'No hidden games yet.' :
                activeTab === 'watched' ? 'No watched games yet.' :
+               activeTab === 'thinking' ? 'No games saved to think about yet.' :
                activeTab === 'collections' ? 'No collections on sale right now.' :
                activeTab === 'sports' ? 'No sports games on sale right now.' :
                'No games match your filters.'}
@@ -350,28 +439,25 @@ export default function DealsClient() {
                   game={game}
                   preferences={preferences}
                   rating={ratings[game.fs_id]}
+                  media={media[game.fs_id]}
                   onHide={activeTab === 'hidden' ? handleUnhide : handleHide}
                   onWatch={handleWatch}
                   onUnwatch={handleUnwatch}
                   hideLabel={activeTab === 'hidden' ? 'Unhide' : 'Hide'}
+                  onOpenDetail={setDetailGame}
+                  onThink={handleThink}
                 />
               ))}
             </div>
 
-            {(activeTab === 'deals' || activeTab === 'collections' || activeTab === 'sports') &&
-             currentGames.length < currentTotal && (
-              <div className="flex justify-center mt-8">
-                <button
-                  onClick={() => {
-                    if (activeTab === 'collections') fetchCollections(collectionGames.length, true);
-                    else if (activeTab === 'sports') fetchSports(sportsGames.length, true);
-                    else fetchMainGames(allGames.length, true);
-                  }}
-                  disabled={loadingMore}
-                  className="px-6 py-2.5 bg-white text-sm font-medium text-gray-700 rounded-xl hover:bg-gray-100 transition-colors disabled:opacity-50"
-                >
-                  {loadingMore ? 'Loading...' : `Load more (${currentGames.length} of ${currentTotal})`}
-                </button>
+            {canLoadMore && (
+              <div ref={sentinelRef} className="flex justify-center mt-8 py-4">
+                {loadingMore && (
+                  <div className="flex items-center gap-2 text-sm text-gray-400">
+                    <div className="w-4 h-4 border-2 border-gray-300 border-t-[#E60012] rounded-full animate-spin" />
+                    Loading more...
+                  </div>
+                )}
               </div>
             )}
 
@@ -382,9 +468,26 @@ export default function DealsClient() {
                 </p>
               </div>
             )}
+
+            {activeTab === 'thinking' && sortedGames.length > 0 && (
+              <div className="mt-6 p-4 bg-blue-50 rounded-xl">
+                <p className="text-sm text-blue-700">
+                  Games you&apos;re considering. They remain visible in the Deals tab. Click the bookmark again to remove.
+                </p>
+              </div>
+            )}
           </>
         )}
       </main>
+
+      {detailGame && (
+        <GameDetailModal
+          game={detailGame}
+          rating={ratings[detailGame.fs_id]}
+          media={media[detailGame.fs_id]}
+          onClose={() => setDetailGame(null)}
+        />
+      )}
     </div>
   );
 }

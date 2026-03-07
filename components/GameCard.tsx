@@ -1,15 +1,18 @@
 'use client';
 
-import { NintendoGame, Preferences, GameRating } from '@/lib/types';
+import { NintendoGame, Preferences, GameRating, GameMedia } from '@/lib/types';
 
 interface GameCardProps {
   game: NintendoGame;
   preferences: Preferences;
   rating?: GameRating;
+  media?: GameMedia;
   onHide: (gameId: string) => void;
   onWatch: (gameId: string, threshold: 2 | 5 | 10, title: string) => void;
   hideLabel?: string;
   onUnwatch?: (gameId: string) => void;
+  onOpenDetail?: (game: NintendoGame) => void;
+  onThink?: (gameId: string) => void;
 }
 
 const CAT_ES_TO_EN: Record<string, string> = {
@@ -59,7 +62,7 @@ function ratingBg(score: number): string {
   return 'bg-red-50';
 }
 
-export default function GameCard({ game, preferences, rating, onHide, onWatch, hideLabel = 'Hide', onUnwatch }: GameCardProps) {
+export default function GameCard({ game, preferences, rating, media, onHide, onWatch, hideLabel = 'Hide', onUnwatch, onOpenDetail, onThink }: GameCardProps) {
   const watchEntry = preferences.watchGames[game.fs_id];
 
   const imageUrl = game.image_url_h2x1_s || game.image_url_h16x9_s || game.image_url_sq_s;
@@ -70,12 +73,15 @@ export default function GameCard({ game, preferences, rating, onHide, onWatch, h
 
   return (
     <div className="bg-white rounded-2xl overflow-hidden flex flex-col">
-      <div className="relative w-full aspect-video bg-gray-200">
+      <div
+        className={`relative w-full aspect-video bg-gray-200 ${onOpenDetail || (media && media.screenshots.length > 0) ? 'cursor-pointer group' : ''}`}
+        onClick={() => onOpenDetail?.(game)}
+      >
         {imageUrl && (
           <img
             src={imageUrl}
             alt={game.title}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-cover group-hover:brightness-90 transition-all"
             loading="lazy"
           />
         )}
@@ -87,6 +93,22 @@ export default function GameCard({ game, preferences, rating, onHide, onWatch, h
             <span className={ratingColor(rating.total_rating)}>
               ★ {Math.round(rating.total_rating)}
             </span>
+          </div>
+        )}
+        {media && (media.screenshots.length > 0 || media.videos?.some((v) => v.type === 'youtube')) && (
+          <div className="absolute bottom-2 left-2 flex gap-1.5 opacity-70 group-hover:opacity-100 transition-opacity">
+            {media.screenshots.length > 0 && (
+              <span className="bg-black/60 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded flex items-center gap-1">
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="12" cy="12" r="3"/></svg>
+                {media.screenshots.length}
+              </span>
+            )}
+            {media.videos?.some((v) => v.type === 'youtube') && (
+              <span className="bg-black/60 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded flex items-center gap-1">
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+                Trailer
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -117,17 +139,24 @@ export default function GameCard({ game, preferences, rating, onHide, onWatch, h
           <div className="flex items-center gap-2 flex-wrap">
             {rating.aggregated_rating != null && (
               <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded ${ratingBg(rating.aggregated_rating)} ${ratingColor(rating.aggregated_rating)}`} title={`Critic score (${rating.aggregated_rating_count} reviews)`}>
-                🎬 {Math.round(rating.aggregated_rating)}
+                🎬 {Math.round(rating.aggregated_rating)} ({rating.aggregated_rating_count})
               </span>
             )}
             {rating.rating != null && (
-              <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded ${ratingBg(rating.rating)} ${ratingColor(rating.rating)}`} title={`User score (${rating.rating_count} ratings)`}>
-                👤 {Math.round(rating.rating)}
+              <span
+                className={`text-[11px] font-semibold px-1.5 py-0.5 rounded ${
+                  rating.rating_count <= 1
+                    ? 'bg-orange-50 text-orange-600 border border-orange-200'
+                    : `${ratingBg(rating.rating)} ${ratingColor(rating.rating)}`
+                }`}
+                title={rating.rating_count <= 1 ? `User score based on only ${rating.rating_count} rating — unreliable` : `User score (${rating.rating_count} ratings)`}
+              >
+                👤 {Math.round(rating.rating)} ({rating.rating_count}){rating.rating_count <= 1 ? ' ⚠' : ''}
               </span>
             )}
-            {rating.total_rating != null && rating.aggregated_rating != null && rating.rating != null && (
-              <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded ${ratingBg(rating.total_rating)} ${ratingColor(rating.total_rating)}`} title="Combined score">
-                ⭐ {Math.round(rating.total_rating)}
+            {rating.total_rating != null && rating.aggregated_rating == null && rating.rating != null && rating.rating_count <= 1 && (
+              <span className="text-[10px] text-orange-500 font-medium">
+                Few reviews
               </span>
             )}
           </div>
@@ -159,6 +188,18 @@ export default function GameCard({ game, preferences, rating, onHide, onWatch, h
             Nintendo
           </a>
 
+          {media?.igdb_url && (
+            <a
+              href={media.igdb_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 bg-purple-600 text-white text-xs font-semibold px-3 py-2 rounded-lg hover:bg-purple-700 transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+              IGDB
+            </a>
+          )}
+
           <button
             onClick={() => onHide(game.fs_id)}
             className="inline-flex items-center gap-1.5 bg-gray-100 text-gray-500 text-xs font-medium px-3 py-2 rounded-lg hover:bg-gray-200 transition-colors"
@@ -166,6 +207,20 @@ export default function GameCard({ game, preferences, rating, onHide, onWatch, h
             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>
             {hideLabel}
           </button>
+
+          {onThink && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onThink(game.fs_id); }}
+              className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-2 rounded-lg transition-colors ${
+                preferences.thinkingAbout?.includes(game.fs_id)
+                  ? 'bg-blue-200 text-blue-800 hover:bg-blue-300'
+                  : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+              }`}
+              title={preferences.thinkingAbout?.includes(game.fs_id) ? 'Remove from thinking list' : 'Save to think about'}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill={preferences.thinkingAbout?.includes(game.fs_id) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>
+            </button>
+          )}
 
           {watchThresholds.map((t) => (
             <button

@@ -23,6 +23,7 @@ export interface Preferences {
     string,
     { threshold: 2 | 5 | 10; title: string }
   >;
+  thinkingAbout: string[];
 }
 
 export interface GamesResponse {
@@ -52,3 +53,22 @@ export interface GameRating {
 }
 
 export type RatingsMap = Record<string, GameRating>;
+
+export interface GameMedia {
+  screenshots: string[];
+  videos: GameVideo[];
+  igdb_url: string | null;
+  source: 'nintendo' | 'igdb';
+  last_updated: string;
+}
+
+export interface GameVideo {
+  video_id: string;
+  name?: string;
+  youtube_url?: string;
+  thumbnail?: string;
+  embed_url?: string;
+  type: 'youtube' | 'limelight';
+}
+
+export type MediaMap = Record<string, GameMedia>;
