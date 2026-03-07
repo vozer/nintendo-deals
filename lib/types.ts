@@ -21,7 +21,7 @@ export interface Preferences {
   hiddenGames: string[];
   watchGames: Record<
     string,
-    { threshold: 5 | 10; title: string }
+    { threshold: 2 | 5 | 10; title: string }
   >;
 }
 
@@ -30,11 +30,25 @@ export interface GamesResponse {
   total: number;
 }
 
-export type SortOption = 'discount' | 'price_asc' | 'price_desc' | 'title' | 'popularity';
+export type SortOption =
+  | 'discount'
+  | 'price_asc'
+  | 'price_desc'
+  | 'title'
+  | 'popularity'
+  | 'rating'
+  | 'value';
 
-export interface PreferenceAction {
-  action: 'hide' | 'unhide' | 'watch' | 'unwatch';
-  gameId: string;
-  threshold?: 5 | 10;
-  title?: string;
+export interface GameRating {
+  igdb_id: number;
+  total_rating: number | null;
+  aggregated_rating: number | null;
+  rating: number | null;
+  rating_count: number;
+  aggregated_rating_count: number;
+  matched_title: string;
+  confidence: number;
+  last_updated: string;
 }
+
+export type RatingsMap = Record<string, GameRating>;

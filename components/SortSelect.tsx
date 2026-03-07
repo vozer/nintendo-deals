@@ -8,6 +8,8 @@ const SORT_OPTIONS: { value: SortOption; label: string }[] = [
   { value: 'price_asc', label: 'Price ↑' },
   { value: 'price_desc', label: 'Price ↓' },
   { value: 'title', label: 'Title A-Z' },
+  { value: 'rating', label: 'Rating ★' },
+  { value: 'value', label: 'Best Value' },
 ];
 
 interface SortSelectProps {

@@ -17,6 +17,8 @@ const SORT_MAP: Record<SortOption, string> = {
   price_desc: 'price_sorting_f desc',
   title: 'sorting_title asc',
   popularity: 'popularity asc',
+  rating: 'popularity asc',
+  value: 'popularity asc',
 };
 
 export async function fetchDeals(options: {

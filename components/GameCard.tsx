@@ -1,12 +1,13 @@
 'use client';
 
-import { NintendoGame, Preferences } from '@/lib/types';
+import { NintendoGame, Preferences, GameRating } from '@/lib/types';
 
 interface GameCardProps {
   game: NintendoGame;
   preferences: Preferences;
+  rating?: GameRating;
   onHide: (gameId: string) => void;
-  onWatch: (gameId: string, threshold: 5 | 10, title: string) => void;
+  onWatch: (gameId: string, threshold: 2 | 5 | 10, title: string) => void;
   hideLabel?: string;
   onUnwatch?: (gameId: string) => void;
 }
@@ -46,12 +47,26 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
 
 const DEFAULT_COLOR = { bg: 'bg-gray-100', text: 'text-gray-600' };
 
-export default function GameCard({ game, preferences, onHide, onWatch, hideLabel = 'Hide', onUnwatch }: GameCardProps) {
+function ratingColor(score: number): string {
+  if (score >= 75) return 'text-green-600';
+  if (score >= 50) return 'text-yellow-600';
+  return 'text-red-500';
+}
+
+function ratingBg(score: number): string {
+  if (score >= 75) return 'bg-green-50';
+  if (score >= 50) return 'bg-yellow-50';
+  return 'bg-red-50';
+}
+
+export default function GameCard({ game, preferences, rating, onHide, onWatch, hideLabel = 'Hide', onUnwatch }: GameCardProps) {
   const watchEntry = preferences.watchGames[game.fs_id];
 
   const imageUrl = game.image_url_h2x1_s || game.image_url_h16x9_s || game.image_url_sq_s;
   const nintendoUrl = `https://www.nintendo.com${game.url}`;
   const categories = (game.pretty_game_categories_txt || []).slice(0, 3);
+
+  const watchThresholds: (2 | 5 | 10)[] = [2, 5, 10];
 
   return (
     <div className="bg-white rounded-2xl overflow-hidden flex flex-col">
@@ -67,6 +82,13 @@ export default function GameCard({ game, preferences, onHide, onWatch, hideLabel
         <div className="absolute top-2 right-2 bg-[#E60012] text-white text-xs font-bold px-2 py-1 rounded-lg">
           -{Math.round(game.price_discount_percentage_f)}%
         </div>
+        {rating && rating.total_rating != null && (
+          <div className={`absolute top-2 left-2 ${ratingBg(rating.total_rating)} backdrop-blur-sm text-xs font-bold px-2 py-1 rounded-lg flex items-center gap-1`}>
+            <span className={ratingColor(rating.total_rating)}>
+              ★ {Math.round(rating.total_rating)}
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="p-4 flex flex-col gap-2.5 flex-1">
@@ -90,6 +112,26 @@ export default function GameCard({ game, preferences, onHide, onWatch, hideLabel
             );
           })}
         </div>
+
+        {rating && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {rating.aggregated_rating != null && (
+              <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded ${ratingBg(rating.aggregated_rating)} ${ratingColor(rating.aggregated_rating)}`} title={`Critic score (${rating.aggregated_rating_count} reviews)`}>
+                🎬 {Math.round(rating.aggregated_rating)}
+              </span>
+            )}
+            {rating.rating != null && (
+              <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded ${ratingBg(rating.rating)} ${ratingColor(rating.rating)}`} title={`User score (${rating.rating_count} ratings)`}>
+                👤 {Math.round(rating.rating)}
+              </span>
+            )}
+            {rating.total_rating != null && rating.aggregated_rating != null && rating.rating != null && (
+              <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded ${ratingBg(rating.total_rating)} ${ratingColor(rating.total_rating)}`} title="Combined score">
+                ⭐ {Math.round(rating.total_rating)}
+              </span>
+            )}
+          </div>
+        )}
 
         {game.excerpt && (
           <p className="text-sm text-gray-500 leading-relaxed line-clamp-3">
@@ -125,28 +167,28 @@ export default function GameCard({ game, preferences, onHide, onWatch, hideLabel
             {hideLabel}
           </button>
 
-          <button
-            onClick={() => watchEntry?.threshold === 5 && onUnwatch ? onUnwatch(game.fs_id) : onWatch(game.fs_id, 5, game.title)}
-            className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-2 rounded-lg transition-colors ${
-              watchEntry?.threshold === 5
-                ? 'bg-amber-200 text-amber-800 hover:bg-amber-300'
-                : 'bg-amber-50 text-amber-600 hover:bg-amber-100'
-            }`}
-            title={watchEntry?.threshold === 5 ? 'Remove watch' : 'Watch for price below 5€'}
-          >
-            &lt; 5€
-          </button>
-          <button
-            onClick={() => watchEntry?.threshold === 10 && onUnwatch ? onUnwatch(game.fs_id) : onWatch(game.fs_id, 10, game.title)}
-            className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-2 rounded-lg transition-colors ${
-              watchEntry?.threshold === 10
-                ? 'bg-amber-200 text-amber-800 hover:bg-amber-300'
-                : 'bg-amber-50 text-amber-600 hover:bg-amber-100'
-            }`}
-            title={watchEntry?.threshold === 10 ? 'Remove watch' : 'Watch for price below 10€'}
-          >
-            &lt; 10€
-          </button>
+          {watchThresholds.map((t) => (
+            <button
+              key={t}
+              onClick={() =>
+                watchEntry?.threshold === t && onUnwatch
+                  ? onUnwatch(game.fs_id)
+                  : onWatch(game.fs_id, t, game.title)
+              }
+              className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-2 rounded-lg transition-colors ${
+                watchEntry?.threshold === t
+                  ? 'bg-amber-200 text-amber-800 hover:bg-amber-300'
+                  : 'bg-amber-50 text-amber-600 hover:bg-amber-100'
+              }`}
+              title={
+                watchEntry?.threshold === t
+                  ? 'Remove watch'
+                  : `Watch for price below ${t}€`
+              }
+            >
+              &lt; {t}€
+            </button>
+          ))}
         </div>
       </div>
     </div>

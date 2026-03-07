@@ -1,17 +1,19 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { NintendoGame, Preferences, SortOption } from '@/lib/types';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { NintendoGame, Preferences, SortOption, RatingsMap } from '@/lib/types';
+import { classifyGames, GameClassification } from '@/lib/filters';
 import GameCard from './GameCard';
 import SearchBar from './SearchBar';
 import SortSelect from './SortSelect';
 
-type ViewTab = 'deals' | 'hidden' | 'watched';
+type ViewTab = 'deals' | 'collections' | 'sports' | 'hidden' | 'watched';
 
 export default function DealsClient() {
   const [games, setGames] = useState<NintendoGame[]>([]);
   const [total, setTotal] = useState(0);
   const [preferences, setPreferences] = useState<Preferences>({ hiddenGames: [], watchGames: {} });
+  const [ratings, setRatings] = useState<RatingsMap>({});
   const [sort, setSort] = useState<SortOption>('popularity');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -24,7 +26,7 @@ export default function DealsClient() {
     else setLoadingMore(true);
 
     try {
-      const params = new URLSearchParams({ sort, rows: '48', start: String(start) });
+      const params = new URLSearchParams({ sort: sort === 'rating' || sort === 'value' ? 'popularity' : sort, rows: '48', start: String(start) });
       if (search) params.set('search', search);
       const res = await fetch(`/api/games?${params}`);
       if (!res.ok) throw new Error('Failed to fetch');
@@ -57,8 +59,21 @@ export default function DealsClient() {
     }
   }, []);
 
+  const fetchRatings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/ratings');
+      if (res.ok) {
+        const data = await res.json();
+        setRatings(data);
+      }
+    } catch {
+      // continue without ratings
+    }
+  }, []);
+
   useEffect(() => { fetchGames(); }, [fetchGames]);
   useEffect(() => { fetchPreferences(); }, [fetchPreferences]);
+  useEffect(() => { fetchRatings(); }, [fetchRatings]);
 
   function persistPrefs(prefs: Preferences) {
     fetch('/api/preferences', {
@@ -90,7 +105,7 @@ export default function DealsClient() {
     }));
   }
 
-  function handleWatch(gameId: string, threshold: 5 | 10, title: string) {
+  function handleWatch(gameId: string, threshold: 2 | 5 | 10, title: string) {
     updatePrefs((prev) => ({
       ...prev,
       watchGames: { ...prev.watchGames, [gameId]: { threshold, title } },
@@ -110,28 +125,83 @@ export default function DealsClient() {
     window.location.href = '/login';
   }
 
+  const classified = useMemo(() => classifyGames(games), [games]);
+
   const hiddenCount = preferences.hiddenGames.length;
   const watchedCount = Object.keys(preferences.watchGames).length;
 
-  const filteredGames = games.filter((game) => {
+  const tabGames = useMemo((): NintendoGame[] => {
     switch (activeTab) {
-      case 'deals': {
-        if (preferences.hiddenGames.includes(game.fs_id)) return false;
-        const w = preferences.watchGames[game.fs_id];
-        if (w && game.price_discounted_f >= w.threshold) return false;
-        return true;
-      }
+      case 'deals':
+        return classified.deals.filter((game) => {
+          if (preferences.hiddenGames.includes(game.fs_id)) return false;
+          const w = preferences.watchGames[game.fs_id];
+          if (w && game.price_discounted_f >= w.threshold) return false;
+          return true;
+        });
+      case 'collections':
+        return classified.collections.filter((game) => {
+          if (preferences.hiddenGames.includes(game.fs_id)) return false;
+          const w = preferences.watchGames[game.fs_id];
+          if (w && game.price_discounted_f >= w.threshold) return false;
+          return true;
+        });
+      case 'sports':
+        return classified.sports.filter((game) => {
+          if (preferences.hiddenGames.includes(game.fs_id)) return false;
+          const w = preferences.watchGames[game.fs_id];
+          if (w && game.price_discounted_f >= w.threshold) return false;
+          return true;
+        });
       case 'hidden':
-        return preferences.hiddenGames.includes(game.fs_id);
+        return games.filter((g) => preferences.hiddenGames.includes(g.fs_id));
       case 'watched':
-        return game.fs_id in preferences.watchGames;
+        return games.filter((g) => g.fs_id in preferences.watchGames);
       default:
-        return true;
+        return [];
     }
-  });
+  }, [activeTab, classified, games, preferences]);
+
+  const sortedGames = useMemo((): NintendoGame[] => {
+    if (sort !== 'rating' && sort !== 'value') return tabGames;
+
+    const sorted = [...tabGames];
+    if (sort === 'rating') {
+      sorted.sort((a, b) => {
+        const ra = ratings[a.fs_id]?.total_rating ?? -1;
+        const rb = ratings[b.fs_id]?.total_rating ?? -1;
+        return rb - ra;
+      });
+    } else {
+      sorted.sort((a, b) => {
+        const ra = ratings[a.fs_id]?.total_rating ?? -1;
+        const rb = ratings[b.fs_id]?.total_rating ?? -1;
+        const hasRatingA = ra >= 0;
+        const hasRatingB = rb >= 0;
+        if (hasRatingA && !hasRatingB) return -1;
+        if (!hasRatingA && hasRatingB) return 1;
+        if (!hasRatingA && !hasRatingB) return a.price_discounted_f - b.price_discounted_f;
+        const priceCompare = a.price_discounted_f - b.price_discounted_f;
+        if (priceCompare !== 0) return priceCompare;
+        return rb - ra;
+      });
+    }
+    return sorted;
+  }, [tabGames, sort, ratings]);
+
+  const dealsCount = useMemo(() => {
+    return classified.deals.filter((game) => {
+      if (preferences.hiddenGames.includes(game.fs_id)) return false;
+      const w = preferences.watchGames[game.fs_id];
+      if (w && game.price_discounted_f >= w.threshold) return false;
+      return true;
+    }).length;
+  }, [classified.deals, preferences]);
 
   const TABS: { id: ViewTab; label: string; count?: number }[] = [
-    { id: 'deals', label: 'Deals' },
+    { id: 'deals', label: 'Deals', count: dealsCount },
+    { id: 'collections', label: 'Collections' },
+    { id: 'sports', label: 'Sports' },
     { id: 'hidden', label: 'Hidden', count: hiddenCount },
     { id: 'watched', label: 'Watched', count: watchedCount },
   ];
@@ -142,7 +212,7 @@ export default function DealsClient() {
         <h1 className="text-white font-bold text-lg sm:text-xl tracking-tight">Nintendo Deals</h1>
         <div className="flex items-center gap-3">
           <span className="bg-white/15 text-white text-xs font-semibold px-3 py-1 rounded-full">
-            {total.toLocaleString()} deals
+            {dealsCount.toLocaleString()} deals
           </span>
           <button onClick={handleLogout} className="text-white/70 hover:text-white transition-colors" title="Logout">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
@@ -155,13 +225,13 @@ export default function DealsClient() {
         <SortSelect value={sort} onChange={setSort} />
       </div>
 
-      <div className="bg-white px-4 sm:px-8 border-b border-gray-100">
-        <div className="flex gap-1">
+      <div className="bg-white px-4 sm:px-8 border-b border-gray-100 overflow-x-auto">
+        <div className="flex gap-1 min-w-max">
           {TABS.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-2.5 text-sm font-medium transition-colors relative ${
+              className={`px-4 py-2.5 text-sm font-medium transition-colors relative whitespace-nowrap ${
                 activeTab === tab.id
                   ? 'text-[#E60012]'
                   : 'text-gray-500 hover:text-gray-700'
@@ -205,22 +275,25 @@ export default function DealsClient() {
               Try again
             </button>
           </div>
-        ) : filteredGames.length === 0 ? (
+        ) : sortedGames.length === 0 ? (
           <div className="text-center py-20">
             <p className="text-gray-400 text-sm">
               {activeTab === 'hidden' ? 'No hidden games yet.' :
                activeTab === 'watched' ? 'No watched games yet.' :
+               activeTab === 'collections' ? 'No collections on sale right now.' :
+               activeTab === 'sports' ? 'No sports games on sale right now.' :
                'No games match your filters.'}
             </p>
           </div>
         ) : (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredGames.map((game) => (
+              {sortedGames.map((game) => (
                 <GameCard
                   key={game.fs_id}
                   game={game}
                   preferences={preferences}
+                  rating={ratings[game.fs_id]}
                   onHide={activeTab === 'hidden' ? handleUnhide : handleHide}
                   onWatch={handleWatch}
                   onUnwatch={handleUnwatch}
@@ -241,7 +314,7 @@ export default function DealsClient() {
               </div>
             )}
 
-            {activeTab === 'watched' && filteredGames.length > 0 && (
+            {activeTab === 'watched' && sortedGames.length > 0 && (
               <div className="mt-6 p-4 bg-amber-50 rounded-xl">
                 <p className="text-sm text-amber-700">
                   Games below are on your watch list. They&apos;re hidden from the Deals tab until their price drops below your threshold. Click the active threshold button to remove the watch.

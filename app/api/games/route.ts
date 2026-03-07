@@ -4,7 +4,8 @@ import { SortOption } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
-const VALID_SORTS: SortOption[] = ['discount', 'price_asc', 'price_desc', 'title', 'popularity'];
+const VALID_SORTS: SortOption[] = ['discount', 'price_asc', 'price_desc', 'title', 'popularity', 'rating', 'value'];
+const SERVER_SORT_MAP: Partial<Record<SortOption, SortOption>> = { rating: 'popularity', value: 'popularity' };
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -18,7 +19,8 @@ export async function GET(req: NextRequest) {
   const rows = Math.min(100, Math.max(1, Number(searchParams.get('rows') || 48)));
 
   try {
-    const data = await fetchDeals({ sort, search, start, rows });
+    const serverSort = SERVER_SORT_MAP[sort] || sort;
+    const data = await fetchDeals({ sort: serverSort, search, start, rows });
     return NextResponse.json(data);
   } catch (error) {
     console.error('Failed to fetch Nintendo deals:', error);
