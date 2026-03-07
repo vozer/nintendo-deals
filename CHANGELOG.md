@@ -4,19 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [1.1.0] - 2026-03-06
+## [1.1.0] - 2026-03-07
 
 ### Fixed
 
 - **Stale game data**: Nintendo API responses were cached by Vercel edge — switched to `cache: 'no-store'` and `dynamic = 'force-dynamic'` to always fetch fresh data
-- **Hidden/watched games not persisting**: Vercel Blob had eventual consistency issues causing preferences to reset on reload — replaced with browser localStorage for instant, reliable reads
+- **Hidden/watched games not persisting on reload**: Fixed Vercel Blob reads by using direct URL fetch with cache-busting instead of relying on `list()` which has ~5s eventual consistency; direct URL reads are consistent after ~2s
 
 ### Changed
 
-- User preferences (hidden games, watch thresholds) now stored in browser localStorage instead of Vercel Blob
-- Removed `/api/preferences` route and `lib/blob-storage.ts`
-- Removed `@vercel/blob` dependency
-- `BLOB_READ_WRITE_TOKEN` environment variable no longer needed
+- Blob read strategy: use `head()` once to discover URL, then direct `fetch()` with timestamp cache-bust and Authorization header
+- `savePreferences` caches the blob URL returned by `put()` for immediate subsequent reads
 
 ## [1.0.0] - 2026-03-06
 

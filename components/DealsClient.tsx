@@ -1,31 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { NintendoGame, Preferences, SortOption } from '@/lib/types';
+import { NintendoGame, Preferences, SortOption, PreferenceAction } from '@/lib/types';
 import GameCard from './GameCard';
 import SearchBar from './SearchBar';
 import SortSelect from './SortSelect';
 
 type ViewTab = 'deals' | 'hidden' | 'watched';
-
-const PREFS_KEY = 'nintendo-deals-prefs';
-
-function loadPrefs(): Preferences {
-  if (typeof window === 'undefined') return { hiddenGames: [], watchGames: {} };
-  try {
-    const raw = localStorage.getItem(PREFS_KEY);
-    if (!raw) return { hiddenGames: [], watchGames: {} };
-    return JSON.parse(raw);
-  } catch {
-    return { hiddenGames: [], watchGames: {} };
-  }
-}
-
-function savePrefs(prefs: Preferences) {
-  try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
-  } catch { /* storage full or unavailable — silent */ }
-}
 
 export default function DealsClient() {
   const [games, setGames] = useState<NintendoGame[]>([]);
@@ -37,18 +18,6 @@ export default function DealsClient() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<ViewTab>('deals');
-
-  useEffect(() => {
-    setPreferences(loadPrefs());
-  }, []);
-
-  function updatePrefs(updater: (prev: Preferences) => Preferences) {
-    setPreferences((prev) => {
-      const next = updater(prev);
-      savePrefs(next);
-      return next;
-    });
-  }
 
   const fetchGames = useCallback(async (start = 0, append = false) => {
     if (!append) setLoading(true);
@@ -76,35 +45,63 @@ export default function DealsClient() {
     }
   }, [sort, search]);
 
+  const fetchPreferences = useCallback(async () => {
+    try {
+      const res = await fetch('/api/preferences');
+      if (res.ok) {
+        const data = await res.json();
+        setPreferences(data);
+      }
+    } catch {
+      // continue without preferences
+    }
+  }, []);
+
   useEffect(() => { fetchGames(); }, [fetchGames]);
+  useEffect(() => { fetchPreferences(); }, [fetchPreferences]);
+
+  async function updatePreference(action: PreferenceAction) {
+    try {
+      const res = await fetch('/api/preferences', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(action),
+      });
+      if (res.ok) setPreferences(await res.json());
+    } catch { /* silent */ }
+  }
 
   function handleHide(gameId: string) {
-    updatePrefs((prev) => ({
+    setPreferences((prev) => ({
       ...prev,
       hiddenGames: prev.hiddenGames.includes(gameId) ? prev.hiddenGames : [...prev.hiddenGames, gameId],
     }));
+    updatePreference({ action: 'hide', gameId });
   }
 
   function handleUnhide(gameId: string) {
-    updatePrefs((prev) => ({
+    setPreferences((prev) => ({
       ...prev,
       hiddenGames: prev.hiddenGames.filter((id) => id !== gameId),
     }));
+    updatePreference({ action: 'unhide', gameId });
   }
 
   function handleWatch(gameId: string, threshold: 5 | 10, title: string) {
-    updatePrefs((prev) => ({
+    setPreferences((prev) => ({
       ...prev,
       watchGames: { ...prev.watchGames, [gameId]: { threshold, title } },
     }));
+    updatePreference({ action: 'watch', gameId, threshold, title });
   }
 
   function handleUnwatch(gameId: string) {
-    updatePrefs((prev) => {
+    setPreferences((prev) => {
       const next = { ...prev, watchGames: { ...prev.watchGames } };
       delete next.watchGames[gameId];
       return next;
     });
+    updatePreference({ action: 'unwatch', gameId });
   }
 
   async function handleLogout() {
