@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { NintendoGame, Preferences, SortOption, PreferenceAction } from '@/lib/types';
+import { NintendoGame, Preferences, SortOption } from '@/lib/types';
 import GameCard from './GameCard';
 import SearchBar from './SearchBar';
 import SortSelect from './SortSelect';
@@ -60,48 +60,49 @@ export default function DealsClient() {
   useEffect(() => { fetchGames(); }, [fetchGames]);
   useEffect(() => { fetchPreferences(); }, [fetchPreferences]);
 
-  async function updatePreference(action: PreferenceAction) {
-    try {
-      const res = await fetch('/api/preferences', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(action),
-      });
-      if (res.ok) setPreferences(await res.json());
-    } catch { /* silent */ }
+  function persistPrefs(prefs: Preferences) {
+    fetch('/api/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(prefs),
+    }).catch(() => { /* silent — optimistic UI is authoritative */ });
+  }
+
+  function updatePrefs(updater: (prev: Preferences) => Preferences) {
+    setPreferences((prev) => {
+      const next = updater(prev);
+      persistPrefs(next);
+      return next;
+    });
   }
 
   function handleHide(gameId: string) {
-    setPreferences((prev) => ({
+    updatePrefs((prev) => ({
       ...prev,
       hiddenGames: prev.hiddenGames.includes(gameId) ? prev.hiddenGames : [...prev.hiddenGames, gameId],
     }));
-    updatePreference({ action: 'hide', gameId });
   }
 
   function handleUnhide(gameId: string) {
-    setPreferences((prev) => ({
+    updatePrefs((prev) => ({
       ...prev,
       hiddenGames: prev.hiddenGames.filter((id) => id !== gameId),
     }));
-    updatePreference({ action: 'unhide', gameId });
   }
 
   function handleWatch(gameId: string, threshold: 5 | 10, title: string) {
-    setPreferences((prev) => ({
+    updatePrefs((prev) => ({
       ...prev,
       watchGames: { ...prev.watchGames, [gameId]: { threshold, title } },
     }));
-    updatePreference({ action: 'watch', gameId, threshold, title });
   }
 
   function handleUnwatch(gameId: string) {
-    setPreferences((prev) => {
+    updatePrefs((prev) => {
       const next = { ...prev, watchGames: { ...prev.watchGames } };
       delete next.watchGames[gameId];
       return next;
     });
-    updatePreference({ action: 'unwatch', gameId });
   }
 
   async function handleLogout() {

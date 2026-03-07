@@ -12,29 +12,15 @@ const DEFAULT_PREFS: Preferences = {
   watchGames: {},
 };
 
-let cachedBlobUrl: string | null = null;
-
-async function getBlobUrl(): Promise<string | null> {
-  if (cachedBlobUrl) return cachedBlobUrl;
-  try {
-    const meta = await head(PREFS_KEY, { token: getToken() });
-    cachedBlobUrl = meta.url;
-    return cachedBlobUrl;
-  } catch {
-    return null;
-  }
-}
-
 export async function getPreferences(): Promise<Preferences> {
   try {
-    const url = await getBlobUrl();
-    if (!url) return { ...DEFAULT_PREFS };
+    const token = getToken();
+    const meta = await head(PREFS_KEY, { token });
+    if (!meta) return { ...DEFAULT_PREFS };
 
-    const res = await fetch(`${url}?t=${Date.now()}`, {
+    const res = await fetch(`${meta.url}?t=${Date.now()}`, {
       cache: 'no-store',
-      headers: {
-        Authorization: `Bearer ${getToken()}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return { ...DEFAULT_PREFS };
     return await res.json();
@@ -44,7 +30,7 @@ export async function getPreferences(): Promise<Preferences> {
 }
 
 export async function savePreferences(prefs: Preferences): Promise<void> {
-  const blob = await put(PREFS_KEY, JSON.stringify(prefs), {
+  await put(PREFS_KEY, JSON.stringify(prefs), {
     access: 'private',
     contentType: 'application/json',
     addRandomSuffix: false,
@@ -52,5 +38,4 @@ export async function savePreferences(prefs: Preferences): Promise<void> {
     cacheControlMaxAge: 0,
     token: getToken(),
   });
-  cachedBlobUrl = blob.url;
 }
