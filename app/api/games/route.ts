@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
     : 'popularity';
   const search = searchParams.get('search') || undefined;
   const start = Math.max(0, Number(searchParams.get('start') || 0));
-  const rows = Math.min(100, Math.max(1, Number(searchParams.get('rows') || 48)));
+  const rows = Math.min(3000, Math.max(1, Number(searchParams.get('rows') || 48)));
 
   try {
     const serverSort = SERVER_SORT_MAP[sort] || sort;

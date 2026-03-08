@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.5.0] - 2026-03-08
+
+### Changed
+
+- **Rating sort now covers ALL games** — fetches entire 2,504-game catalog (paginating through Solr's 1000-row cap) instead of sorting only the 48 loaded games
+- **Bayesian average scoring** — ratings weighted by review count using formula `B = (v/(v+m))×R + (m/(v+m))×C` (m=5, C=global mean ~68.8), dampening outlier ratings from few reviews
+- **Value sort** — now uses Bayesian score / price ratio for fair ranking
+- **Rating badges** — show Bayesian-adjusted score with review count (e.g., "★ 89 · 1376") and tooltip with raw vs adjusted values
+- **Virtual scroll for rating sorts** — renders 48 games at a time from full sorted array, loads more on scroll
+
 ## [1.4.0] - 2026-03-08
 
 ### Added
