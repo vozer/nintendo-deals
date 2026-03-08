@@ -1,16 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { NintendoGame, GameRating, GameMedia } from '@/lib/types';
+import { NintendoGame, GameRating, GameMedia, CuratedEntry } from '@/lib/types';
 
 interface GameDetailModalProps {
   game: NintendoGame;
   rating?: GameRating;
   media?: GameMedia;
+  curatedEntry?: CuratedEntry;
   onClose: () => void;
 }
 
-export default function GameDetailModal({ game, rating, media, onClose }: GameDetailModalProps) {
+export default function GameDetailModal({ game, rating, media, curatedEntry, onClose }: GameDetailModalProps) {
   const [activeScreenshot, setActiveScreenshot] = useState(0);
   const screenshots = media?.screenshots ?? [];
   const youtubeVideo = media?.videos?.find((v) => v.type === 'youtube');
@@ -193,6 +194,29 @@ export default function GameDetailModal({ game, rating, media, onClose }: GameDe
                   ({rating.matched_title})
                 </span>
               )}
+            </div>
+          )}
+
+          {curatedEntry && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-yellow-800">NintendoLife Review</span>
+                {curatedEntry.rank && (
+                  <span className="text-xs font-semibold bg-yellow-200 text-yellow-800 px-1.5 py-0.5 rounded">
+                    #{curatedEntry.rank}
+                  </span>
+                )}
+              </div>
+              <p className="text-sm text-yellow-900 leading-relaxed italic">&ldquo;{curatedEntry.review}&rdquo;</p>
+              <a
+                href={curatedEntry.source_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs font-medium text-yellow-700 hover:text-yellow-900 transition-colors"
+              >
+                Read full review on NintendoLife
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+              </a>
             </div>
           )}
 

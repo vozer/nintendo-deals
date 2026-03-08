@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCuratedList, saveCuratedList } from '@/lib/curated-storage';
+import { getCuratedMap, saveCuratedMap } from '@/lib/curated-storage';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const list = await getCuratedList();
-    return NextResponse.json(list, {
+    const map = await getCuratedMap();
+    return NextResponse.json(map, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (error) {
-    console.error('Failed to fetch curated list:', error);
-    return NextResponse.json([], { status: 500 });
+    console.error('Failed to fetch curated map:', error);
+    return NextResponse.json({}, { status: 500 });
   }
 }
 
@@ -24,13 +24,13 @@ export async function PUT(req: NextRequest) {
   }
 
   try {
-    const list = await req.json();
-    await saveCuratedList(list);
-    return NextResponse.json({ saved: list.length });
+    const map = await req.json();
+    await saveCuratedMap(map);
+    return NextResponse.json({ saved: Object.keys(map).length });
   } catch (error) {
-    console.error('Failed to save curated list:', error);
+    console.error('Failed to save curated map:', error);
     return NextResponse.json(
-      { error: 'Failed to save curated list' },
+      { error: 'Failed to save curated map' },
       { status: 500 },
     );
   }

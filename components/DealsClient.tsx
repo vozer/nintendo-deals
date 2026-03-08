@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { NintendoGame, Preferences, SortOption, RatingsMap, MediaMap, SteamRatingsMap, CuratedList } from '@/lib/types';
+import { NintendoGame, Preferences, SortOption, RatingsMap, MediaMap, SteamRatingsMap, CuratedMap } from '@/lib/types';
 import { classifyGame } from '@/lib/filters';
 import { bayesianScore, computeGlobalMean, CONFIDENT_THRESHOLD } from '@/lib/sort-utils';
 import GameCard from './GameCard';
@@ -24,7 +24,7 @@ export default function DealsClient() {
   const [ratings, setRatings] = useState<RatingsMap>({});
   const [media, setMedia] = useState<MediaMap>({});
   const [steamRatings, setSteamRatings] = useState<SteamRatingsMap>({});
-  const [curatedList, setCuratedList] = useState<CuratedList>([]);
+  const [curatedMap, setCuratedMap] = useState<CuratedMap>({});
   const [detailGame, setDetailGame] = useState<NintendoGame | null>(null);
   const [sort, setSort] = useState<SortOption>('value');
   const [search, setSearch] = useState('');
@@ -160,7 +160,7 @@ export default function DealsClient() {
       const res = await fetch('/api/curated');
       if (res.ok) {
         const data = await res.json();
-        setCuratedList(data);
+        setCuratedMap(data);
       }
     } catch {
       // continue
@@ -293,35 +293,33 @@ export default function DealsClient() {
       const w = preferences.watchGames[game.fs_id];
       if (w && game.price_discounted_f >= w.threshold) return false;
 
-      // Filter low confidence (few reviews) unless curated
+      const isCurated = game.fs_id in curatedMap;
+      if (isCurated) return true;
+
       const r = ratings[game.fs_id];
-      const isCurated = curatedList.some(t => game.title.includes(t)); // Simple inclusion match
-      // Also consider steam rating as confidence booster?
-      // For now, stick to user rule: "if it has Few reviews warning (filter out completely in its own tab)"
-      // Current "Few reviews" logic is rating_count <= 1 (from old GameCard).
-      // But we want to filter < 10.
-      if (!isCurated && (r?.rating_count ?? 0) < CONFIDENT_THRESHOLD) return false;
+      const s = steamRatings[game.fs_id];
+      const totalVotes = (r?.rating_count ?? 0) + (s?.votes ?? 0);
+      if (totalVotes < CONFIDENT_THRESHOLD) return false;
 
       return true;
     });
-  }, [allGames, preferences, ratings, curatedList]);
+  }, [allGames, preferences, ratings, steamRatings, curatedMap]);
 
-  // Games for the new Low Confidence tab
   const lowConfidenceGames = useMemo(() => {
     return allGames.filter((game) => {
       const cls = classifyGame(game);
       if (cls !== 'deals') return false;
-      // Don't show hidden/thinking
       if (preferences.hiddenGames.includes(game.fs_id)) return false;
       if (preferences.thinkingAbout?.includes(game.fs_id)) return false;
-      
+
+      if (game.fs_id in curatedMap) return false;
+
       const r = ratings[game.fs_id];
-      const isCurated = curatedList.some(t => game.title.includes(t));
-      // Show ONLY low confidence here (and not curated)
-      if (!isCurated && (r?.rating_count ?? 0) < CONFIDENT_THRESHOLD) return true;
-      return false;
+      const s = steamRatings[game.fs_id];
+      const totalVotes = (r?.rating_count ?? 0) + (s?.votes ?? 0);
+      return totalVotes < CONFIDENT_THRESHOLD;
     });
-  }, [allGames, preferences, ratings, curatedList]);
+  }, [allGames, preferences, ratings, steamRatings, curatedMap]);
 
   const hiddenCount = preferences.hiddenGames.length;
   const watchedCount = Object.keys(preferences.watchGames).length;
@@ -363,17 +361,19 @@ export default function DealsClient() {
   const sortedGames = useMemo((): NintendoGame[] => {
     if (!isClientSort) return tabGames;
 
+    const curated = tabGames.filter(g => g.fs_id in curatedMap);
+    const nonCurated = tabGames.filter(g => !(g.fs_id in curatedMap));
+
+    curated.sort((a, b) => (curatedMap[a.fs_id]?.rank ?? 999) - (curatedMap[b.fs_id]?.rank ?? 999));
+
     const maxPrice = 15;
-    const scored = tabGames.map((game) => {
+    const scored = nonCurated.map((game) => {
       const r = ratings[game.fs_id];
       const s = steamRatings[game.fs_id];
-      const isCurated = curatedList.some(t => game.title.includes(t));
-      
+
       const rc = r?.rating_count ?? 0;
       let bs = bayesianScore(r?.total_rating, rc, globalMean);
-      
-      // Blend Steam score if available
-      // Steam % positive is roughly comparable to 0-100 score
+
       if (s) {
         const steamBs = bayesianScore(s.score_pct, s.votes, globalMean);
         if (bs >= 0 && steamBs >= 0) {
@@ -382,24 +382,15 @@ export default function DealsClient() {
           bs = steamBs;
         }
       }
-      
-      // Curated boost
-      if (isCurated && bs >= 0) {
-        bs += 20; // Massive boost for curated games
-      }
 
-      // Confidence check: IGDB count OR Steam count
       const totalVotes = rc + (s?.votes ?? 0);
       const confident = totalVotes >= CONFIDENT_THRESHOLD && bs >= 0;
-      
+
       const priceScore = (1 - game.price_discounted_f / maxPrice) * 100;
       const val = bs >= 0 ? bs * 0.7 + priceScore * 0.3 : -1;
-      return { game, bs, rc, confident, val };
+      return { game, bs, confident, val };
     });
 
-    // Tier 1: confident games (10+ reviews), sorted by metric
-    // Tier 2: games with some rating but few reviews, sorted by metric
-    // Tier 3: unrated games, sorted by price
     const tier1 = scored.filter((s) => s.confident);
     const tier2 = scored.filter((s) => !s.confident && s.bs >= 0);
     const tier3 = scored.filter((s) => s.bs < 0);
@@ -412,8 +403,9 @@ export default function DealsClient() {
     tier2.sort(sortFn);
     tier3.sort((a, b) => a.game.price_discounted_f - b.game.price_discounted_f);
 
-    return [...tier1, ...tier2, ...tier3].map((s) => s.game);
-  }, [tabGames, sort, ratings, globalMean, isClientSort]);
+    const sortedNonCurated = [...tier1, ...tier2, ...tier3].map((s) => s.game);
+    return [...curated, ...sortedNonCurated];
+  }, [tabGames, sort, ratings, steamRatings, globalMean, isClientSort, curatedMap]);
 
   const displayGames = isClientSort && activeTab === 'deals'
     ? sortedGames.slice(0, visibleCount)
@@ -527,7 +519,9 @@ export default function DealsClient() {
                   game={game}
                   preferences={preferences}
                   rating={ratings[game.fs_id]}
+                  steam={steamRatings[game.fs_id]}
                   media={media[game.fs_id]}
+                  isCurated={game.fs_id in curatedMap}
                   globalMean={globalMean}
                   onHide={activeTab === 'hidden' ? handleUnhide : handleHide}
                   onWatch={handleWatch}
@@ -574,6 +568,7 @@ export default function DealsClient() {
           game={detailGame}
           rating={ratings[detailGame.fs_id]}
           media={media[detailGame.fs_id]}
+          curatedEntry={curatedMap[detailGame.fs_id]}
           onClose={() => setDetailGame(null)}
         />
       )}

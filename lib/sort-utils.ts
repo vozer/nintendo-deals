@@ -1,7 +1,17 @@
 import { RatingsMap } from './types';
 
 const MIN_VOTES = 10;
-export const CONFIDENT_THRESHOLD = 10;
+export const CONFIDENT_THRESHOLD = 100;
+
+export function normalizeTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 export function computeGlobalMean(ratings: RatingsMap): number {
   let sum = 0;

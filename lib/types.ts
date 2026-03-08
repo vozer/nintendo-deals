@@ -83,4 +83,11 @@ export interface SteamRating {
 
 export type SteamRatingsMap = Record<string, SteamRating>;
 
-export type CuratedList = string[]; // List of curated game titles (fs_id is harder to match from external sites)
+export interface CuratedEntry {
+  title: string;
+  review: string;
+  source_url: string;
+  rank?: number;
+}
+
+export type CuratedMap = Record<string, CuratedEntry>;
