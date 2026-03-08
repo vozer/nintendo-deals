@@ -21,6 +21,8 @@ const SORT_MAP: Record<SortOption, string> = {
   value: 'popularity asc',
 };
 
+const SOLR_MAX_ROWS = 1000;
+
 export async function fetchDeals(options: {
   sort?: SortOption;
   search?: string;
@@ -40,26 +42,40 @@ export async function fetchDeals(options: {
     // No server-side filter — handled by search query for title words
   }
 
-  const params = new URLSearchParams({
-    q: tab === 'collections' && !search ? '(collection OR bundle OR "in 1" OR "mega pack")' : q,
-    fq,
-    sort: SORT_MAP[sort] || SORT_MAP.popularity,
-    start: String(start),
-    rows: String(rows),
-    wt: 'json',
-  });
+  const baseQ = tab === 'collections' && !search ? '(collection OR bundle OR "in 1" OR "mega pack")' : q;
+  const sortStr = SORT_MAP[sort] || SORT_MAP.popularity;
 
-  const res = await fetch(`${NINTENDO_SOLR_URL}?${params}`, {
-    cache: 'no-store',
-  });
-
-  if (!res.ok) {
-    throw new Error(`Nintendo API error: ${res.status}`);
+  if (rows <= SOLR_MAX_ROWS) {
+    const params = new URLSearchParams({
+      q: baseQ, fq, sort: sortStr,
+      start: String(start), rows: String(rows), wt: 'json',
+    });
+    const res = await fetch(`${NINTENDO_SOLR_URL}?${params}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`Nintendo API error: ${res.status}`);
+    const data = await res.json();
+    return { games: data.response.docs as NintendoGame[], total: data.response.numFound as number };
   }
 
-  const data = await res.json();
-  return {
-    games: data.response.docs as NintendoGame[],
-    total: data.response.numFound as number,
-  };
+  // Paginate through Solr's 1000-row cap
+  const allGames: NintendoGame[] = [];
+  let total = 0;
+  let offset = start;
+
+  while (allGames.length < rows) {
+    const batch = Math.min(SOLR_MAX_ROWS, rows - allGames.length);
+    const params = new URLSearchParams({
+      q: baseQ, fq, sort: sortStr,
+      start: String(offset), rows: String(batch), wt: 'json',
+    });
+    const res = await fetch(`${NINTENDO_SOLR_URL}?${params}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`Nintendo API error: ${res.status}`);
+    const data = await res.json();
+    total = data.response.numFound as number;
+    const docs = data.response.docs as NintendoGame[];
+    allGames.push(...docs);
+    if (docs.length < batch || allGames.length >= total) break;
+    offset += docs.length;
+  }
+
+  return { games: allGames, total };
 }

@@ -1,12 +1,14 @@
 'use client';
 
 import { NintendoGame, Preferences, GameRating, GameMedia } from '@/lib/types';
+import { bayesianScore } from '@/lib/sort-utils';
 
 interface GameCardProps {
   game: NintendoGame;
   preferences: Preferences;
   rating?: GameRating;
   media?: GameMedia;
+  globalMean?: number;
   onHide: (gameId: string) => void;
   onWatch: (gameId: string, threshold: 2 | 5 | 10, title: string) => void;
   hideLabel?: string;
@@ -62,8 +64,11 @@ function ratingBg(score: number): string {
   return 'bg-red-50';
 }
 
-export default function GameCard({ game, preferences, rating, media, onHide, onWatch, hideLabel = 'Hide', onUnwatch, onOpenDetail, onThink }: GameCardProps) {
+export default function GameCard({ game, preferences, rating, media, globalMean, onHide, onWatch, hideLabel = 'Hide', onUnwatch, onOpenDetail, onThink }: GameCardProps) {
   const watchEntry = preferences.watchGames[game.fs_id];
+  const bs = globalMean != null && rating
+    ? bayesianScore(rating.total_rating, rating.rating_count ?? 0, globalMean)
+    : undefined;
 
   const imageUrl = game.image_url_h2x1_s || game.image_url_h16x9_s || game.image_url_sq_s;
   const nintendoUrl = `https://www.nintendo.com${game.url}`;
@@ -89,10 +94,18 @@ export default function GameCard({ game, preferences, rating, media, onHide, onW
           -{Math.round(game.price_discount_percentage_f)}%
         </div>
         {rating && rating.total_rating != null && (
-          <div className={`absolute top-2 left-2 ${ratingBg(rating.total_rating)} backdrop-blur-sm text-xs font-bold px-2 py-1 rounded-lg flex items-center gap-1`}>
-            <span className={ratingColor(rating.total_rating)}>
-              ★ {Math.round(rating.total_rating)}
+          <div
+            className={`absolute top-2 left-2 ${ratingBg(bs != null && bs >= 0 ? bs : rating.total_rating)} backdrop-blur-sm text-xs font-bold px-2 py-1 rounded-lg flex items-center gap-1`}
+            title={bs != null && bs >= 0 ? `Bayesian: ${Math.round(bs)} (raw ${Math.round(rating.total_rating)}, ${rating.rating_count} reviews)` : `Rating: ${Math.round(rating.total_rating)}`}
+          >
+            <span className={ratingColor(bs != null && bs >= 0 ? bs : rating.total_rating)}>
+              ★ {Math.round(bs != null && bs >= 0 ? bs : rating.total_rating)}
             </span>
+            {rating.rating_count > 0 && (
+              <span className="text-[10px] font-medium text-gray-500">
+                · {rating.rating_count}
+              </span>
+            )}
           </div>
         )}
         {media && (media.screenshots.length > 0 || media.videos?.some((v) => v.type === 'youtube')) && (

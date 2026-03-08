@@ -150,6 +150,10 @@ Collections and Sports tabs fetch directly from Nintendo Solr API with tab-speci
 - Rating badges show review count; ≤1 user review shows ⚠ warning
 - Sort by rating/value penalizes games with ≤1 user review
 - IGDB matching uses `title_master_s` from Nintendo API (English titles) for better coverage
+- Rating/value sorts fetch ALL games (paginating Solr's 1000-row cap) for true full-catalog sorting
+- Bayesian average: `B = (v/(v+m))×R + (m/(v+m))×C` where m=5, C=global mean (~68.8), dampens low-review outliers
+- `lib/sort-utils.ts`: `bayesianScore()` and `computeGlobalMean()` utilities
+- Virtual scroll for rating/value sorts: 48 at a time from full sorted array in memory
 
 ## Critical Rules
 

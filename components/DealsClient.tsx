@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { NintendoGame, Preferences, SortOption, RatingsMap, MediaMap } from '@/lib/types';
 import { classifyGame } from '@/lib/filters';
+import { bayesianScore, computeGlobalMean } from '@/lib/sort-utils';
 import GameCard from './GameCard';
 import GameDetailModal from './GameDetailModal';
 import SearchBar from './SearchBar';
@@ -31,15 +32,19 @@ export default function DealsClient() {
   const [activeTab, setActiveTab] = useState<ViewTab>('deals');
   const [collectionsLoaded, setCollectionsLoaded] = useState(false);
   const [sportsLoaded, setSportsLoaded] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(48);
   const sentinelRef = useRef<HTMLDivElement>(null);
+
+  const isClientSort = sort === 'rating' || sort === 'value';
 
   const fetchMainGames = useCallback(async (start = 0, append = false) => {
     if (!append) setLoading(true);
     else setLoadingMore(true);
 
     try {
-      const serverSort = sort === 'rating' || sort === 'value' ? 'popularity' : sort;
-      const params = new URLSearchParams({ sort: serverSort, rows: '48', start: String(start) });
+      const serverSort = isClientSort ? 'popularity' : sort;
+      const rows = isClientSort && !append ? '3000' : '48';
+      const params = new URLSearchParams({ sort: serverSort, rows, start: String(start) });
       if (search) params.set('search', search);
       const res = await fetch(`/api/games?${params}`);
       if (!res.ok) throw new Error('Failed to fetch');
@@ -58,7 +63,7 @@ export default function DealsClient() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [sort, search]);
+  }, [sort, search, isClientSort]);
 
   const fetchCollections = useCallback(async (start = 0, append = false) => {
     try {
@@ -152,6 +157,8 @@ export default function DealsClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sort, search]);
 
+  useEffect(() => { setVisibleCount(48); }, [sort, activeTab, search]);
+
   // Infinite scroll
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -160,11 +167,17 @@ export default function DealsClient() {
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries[0].isIntersecting || loadingMore || loading) return;
-        const canLoadMore =
+
+        if (isClientSort && activeTab === 'deals') {
+          setVisibleCount((prev) => prev + 48);
+          return;
+        }
+
+        const canFetchMore =
           (activeTab === 'deals' && allGames.length < allTotal) ||
           (activeTab === 'collections' && collectionGames.length < collectionTotal) ||
           (activeTab === 'sports' && sportsGames.length < sportsTotal);
-        if (!canLoadMore) return;
+        if (!canFetchMore) return;
 
         if (activeTab === 'collections') fetchCollections(collectionGames.length, true);
         else if (activeTab === 'sports') fetchSports(sportsGames.length, true);
@@ -176,7 +189,7 @@ export default function DealsClient() {
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [
-    activeTab, loadingMore, loading,
+    activeTab, loadingMore, loading, isClientSort,
     allGames.length, allTotal,
     collectionGames.length, collectionTotal,
     sportsGames.length, sportsTotal,
@@ -287,55 +300,50 @@ export default function DealsClient() {
     }
   }, [activeTab, dealsGames, collectionGames, sportsGames, allGames, preferences]);
 
+  const globalMean = useMemo(() => computeGlobalMean(ratings), [ratings]);
+
   const sortedGames = useMemo((): NintendoGame[] => {
-    if (sort !== 'rating' && sort !== 'value') return tabGames;
+    if (!isClientSort) return tabGames;
 
-    const sorted = [...tabGames];
+    const scored = tabGames.map((game) => {
+      const r = ratings[game.fs_id];
+      return {
+        game,
+        bs: bayesianScore(r?.total_rating, r?.rating_count ?? 0, globalMean),
+      };
+    });
+
     if (sort === 'rating') {
-      sorted.sort((a, b) => {
-        const ra = ratings[a.fs_id];
-        const rb = ratings[b.fs_id];
-        const scoreA = ra?.total_rating ?? -1;
-        const scoreB = rb?.total_rating ?? -1;
-
-        const reliableA = scoreA >= 0 && (ra?.rating_count ?? 0) > 1;
-        const reliableB = scoreB >= 0 && (rb?.rating_count ?? 0) > 1;
-        if (reliableA && !reliableB) return -1;
-        if (!reliableA && reliableB) return 1;
-
-        const hasA = scoreA >= 0;
-        const hasB = scoreB >= 0;
-        if (hasA && !hasB) return -1;
-        if (!hasA && hasB) return 1;
-
-        return scoreB - scoreA;
+      scored.sort((a, b) => {
+        if (a.bs >= 0 && b.bs < 0) return -1;
+        if (a.bs < 0 && b.bs >= 0) return 1;
+        if (a.bs < 0 && b.bs < 0) return 0;
+        return b.bs - a.bs;
       });
     } else {
-      sorted.sort((a, b) => {
-        const ra = ratings[a.fs_id];
-        const rb = ratings[b.fs_id];
-        const scoreA = ra?.total_rating ?? -1;
-        const scoreB = rb?.total_rating ?? -1;
-        const hasA = scoreA >= 0;
-        const hasB = scoreB >= 0;
-        const reliableA = hasA && (ra?.rating_count ?? 0) > 1;
-        const reliableB = hasB && (rb?.rating_count ?? 0) > 1;
-
-        if (reliableA && !reliableB) return -1;
-        if (!reliableA && reliableB) return 1;
-        if (!hasA && !hasB) return a.price_discounted_f - b.price_discounted_f;
-
-        const priceCompare = a.price_discounted_f - b.price_discounted_f;
-        if (priceCompare !== 0) return priceCompare;
-        return scoreB - scoreA;
+      scored.sort((a, b) => {
+        if (a.bs >= 0 && b.bs < 0) return -1;
+        if (a.bs < 0 && b.bs >= 0) return 1;
+        if (a.bs < 0 && b.bs < 0) {
+          return a.game.price_discounted_f - b.game.price_discounted_f;
+        }
+        const valA = a.bs / Math.max(a.game.price_discounted_f, 0.01);
+        const valB = b.bs / Math.max(b.game.price_discounted_f, 0.01);
+        return valB - valA;
       });
     }
-    return sorted;
-  }, [tabGames, sort, ratings]);
+
+    return scored.map((s) => s.game);
+  }, [tabGames, sort, ratings, globalMean, isClientSort]);
+
+  const displayGames = isClientSort && activeTab === 'deals'
+    ? sortedGames.slice(0, visibleCount)
+    : sortedGames;
 
   const canLoadMore =
     (activeTab === 'deals' || activeTab === 'collections' || activeTab === 'sports') &&
     (() => {
+      if (isClientSort && activeTab === 'deals') return visibleCount < sortedGames.length;
       if (activeTab === 'collections') return collectionGames.length < collectionTotal;
       if (activeTab === 'sports') return sportsGames.length < sportsTotal;
       return allGames.length < allTotal;
@@ -419,7 +427,7 @@ export default function DealsClient() {
               Try again
             </button>
           </div>
-        ) : sortedGames.length === 0 ? (
+        ) : displayGames.length === 0 ? (
           <div className="text-center py-20">
             <p className="text-gray-400 text-sm">
               {activeTab === 'hidden' ? 'No hidden games yet.' :
@@ -433,13 +441,14 @@ export default function DealsClient() {
         ) : (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {sortedGames.map((game) => (
+              {displayGames.map((game) => (
                 <GameCard
                   key={game.fs_id}
                   game={game}
                   preferences={preferences}
                   rating={ratings[game.fs_id]}
                   media={media[game.fs_id]}
+                  globalMean={globalMean}
                   onHide={activeTab === 'hidden' ? handleUnhide : handleHide}
                   onWatch={handleWatch}
                   onUnwatch={handleUnwatch}
@@ -461,7 +470,7 @@ export default function DealsClient() {
               </div>
             )}
 
-            {activeTab === 'watched' && sortedGames.length > 0 && (
+            {activeTab === 'watched' && displayGames.length > 0 && (
               <div className="mt-6 p-4 bg-amber-50 rounded-xl">
                 <p className="text-sm text-amber-700">
                   Games below are on your watch list. They&apos;re hidden from the Deals tab until their price drops below your threshold. Click the active threshold button to remove the watch.
@@ -469,10 +478,10 @@ export default function DealsClient() {
               </div>
             )}
 
-            {activeTab === 'thinking' && sortedGames.length > 0 && (
+            {activeTab === 'thinking' && displayGames.length > 0 && (
               <div className="mt-6 p-4 bg-blue-50 rounded-xl">
                 <p className="text-sm text-blue-700">
-                  Games you&apos;re considering. They remain visible in the Deals tab. Click the bookmark again to remove.
+                  Games you&apos;re considering. They&apos;re hidden from the Deals tab while bookmarked. Click the bookmark again to remove.
                 </p>
               </div>
             )}
