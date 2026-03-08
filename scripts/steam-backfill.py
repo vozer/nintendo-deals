@@ -4,6 +4,7 @@ import json
 import time
 import re
 import os
+import sys
 import unicodedata
 
 API_KEY = os.environ.get('RATINGS_API_KEY', 'REDACTED_RATINGS_API_KEY')
@@ -56,6 +57,18 @@ def search_steam(title):
     return None
 
 
+def get_steamspy_tags(appid):
+    url = f"https://steamspy.com/api.php?request=appdetails&appid={appid}"
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as res:
+            data = json.loads(res.read())
+            tags = list(data.get('tags', {}).keys())
+            return tags[:15]
+    except Exception:
+        return []
+
+
 def get_steam_review_stats(appid):
     url = f"https://store.steampowered.com/app/{appid}/"
     req = urllib.request.Request(url, headers={
@@ -79,7 +92,67 @@ def get_steam_review_stats(appid):
     return None, None
 
 
+def backfill_tags():
+    """Add SteamSpy tags to existing entries that don't have them."""
+    print("Loading existing steam ratings...")
+    existing = {}
+    try:
+        req = urllib.request.Request(f"{BASE_URL}/api/steam", method='GET')
+        with urllib.request.urlopen(req) as res:
+            existing = json.loads(res.read())
+            print(f"Loaded {len(existing)} existing ratings.")
+    except Exception:
+        print("No existing ratings found.")
+        return
+
+    needs_tags = [k for k, v in existing.items() if 'tags' not in v]
+    print(f"Entries needing tags: {len(needs_tags)}")
+
+    save_counter = 0
+    for i, fs_id in enumerate(needs_tags):
+        entry = existing[fs_id]
+        tags = get_steamspy_tags(entry['steam_id'])
+        entry['tags'] = tags
+        save_counter += 1
+        tag_str = f" {tags[:3]}" if tags else " []"
+        print(f"[{i+1}/{len(needs_tags)}] {entry['matched_title']}{tag_str}")
+        time.sleep(1.0)
+
+        if save_counter >= SAVE_EVERY:
+            print(f"  Saving batch...")
+            req = urllib.request.Request(
+                f"{BASE_URL}/api/steam",
+                data=json.dumps(existing).encode('utf-8'),
+                headers={'Content-Type': 'application/json', 'x-api-key': API_KEY},
+                method='PUT'
+            )
+            try:
+                urllib.request.urlopen(req)
+                save_counter = 0
+            except Exception as e:
+                print(f"  Save failed: {e}")
+
+    if save_counter > 0:
+        print("Final save...")
+        req = urllib.request.Request(
+            f"{BASE_URL}/api/steam",
+            data=json.dumps(existing).encode('utf-8'),
+            headers={'Content-Type': 'application/json', 'x-api-key': API_KEY},
+            method='PUT'
+        )
+        try:
+            urllib.request.urlopen(req)
+        except Exception as e:
+            print(f"Final save failed: {e}")
+
+    print(f"Done. Tagged {len(needs_tags)} entries.")
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == '--tags-only':
+        backfill_tags()
+        return
+
     print("Loading existing steam ratings...")
     existing = {}
     try:
@@ -132,6 +205,7 @@ def main():
 
         if appid:
             pct, count = get_steam_review_stats(appid)
+            tags = get_steamspy_tags(appid)
             if pct is not None:
                 existing[fs_id] = {
                     "steam_id": appid,
@@ -139,13 +213,15 @@ def main():
                     "votes": count,
                     "url": f"https://store.steampowered.com/app/{appid}/",
                     "matched_title": title,
+                    "tags": tags,
                 }
                 updates += 1
                 save_counter += 1
-                print(f"[{i+1}/{len(all_games)}] {title} -> {pct}% ({count})")
+                tag_str = f" tags={tags[:3]}" if tags else ""
+                print(f"[{i+1}/{len(all_games)}] {title} -> {pct}% ({count}){tag_str}")
             else:
                 print(f"[{i+1}/{len(all_games)}] {title} -> AppID {appid} but no reviews")
-            time.sleep(1.5)
+            time.sleep(2.0)
         else:
             not_found += 1
             if i < 100 or i % 100 == 0:

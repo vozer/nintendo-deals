@@ -79,6 +79,7 @@ export interface SteamRating {
   votes: number;
   url: string;
   matched_title: string;
+  tags?: string[];
 }
 
 export type SteamRatingsMap = Record<string, SteamRating>;

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { NintendoGame, Preferences, SortOption, RatingsMap, MediaMap, SteamRatingsMap, CuratedMap } from '@/lib/types';
-import { classifyGame } from '@/lib/filters';
+import { classifyGame, hasBlockedSteamTags } from '@/lib/filters';
 import { bayesianScore, computeGlobalMean, CONFIDENT_THRESHOLD } from '@/lib/sort-utils';
 import GameCard from './GameCard';
 import GameDetailModal from './GameDetailModal';
@@ -293,11 +293,13 @@ export default function DealsClient() {
       const w = preferences.watchGames[game.fs_id];
       if (w && game.price_discounted_f >= w.threshold) return false;
 
+      const s = steamRatings[game.fs_id];
+      if (hasBlockedSteamTags(s?.tags)) return false;
+
       const isCurated = game.fs_id in curatedMap;
       if (isCurated) return true;
 
       const r = ratings[game.fs_id];
-      const s = steamRatings[game.fs_id];
       const totalVotes = (r?.rating_count ?? 0) + (s?.votes ?? 0);
       if (totalVotes < CONFIDENT_THRESHOLD) return false;
 
@@ -312,10 +314,12 @@ export default function DealsClient() {
       if (preferences.hiddenGames.includes(game.fs_id)) return false;
       if (preferences.thinkingAbout?.includes(game.fs_id)) return false;
 
+      const s = steamRatings[game.fs_id];
+      if (hasBlockedSteamTags(s?.tags)) return false;
+
       if (game.fs_id in curatedMap) return false;
 
       const r = ratings[game.fs_id];
-      const s = steamRatings[game.fs_id];
       const totalVotes = (r?.rating_count ?? 0) + (s?.votes ?? 0);
       return totalVotes < CONFIDENT_THRESHOLD;
     });
