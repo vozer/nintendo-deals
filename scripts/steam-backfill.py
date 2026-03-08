@@ -1,91 +1,67 @@
 import urllib.request
+import urllib.parse
 import json
 import time
 import re
-import sys
 import os
 import unicodedata
 
 API_KEY = os.environ.get('RATINGS_API_KEY', 'REDACTED_RATINGS_API_KEY')
 BASE_URL = "https://nintendo-deals.vercel.app"
 SAVE_EVERY = 20
-SOLR_FL = "title,title_master_s,fs_id"
 
 
-def slugify(value):
+def normalize(value):
     value = str(value)
     value = value.replace('\u00ae', '').replace('\u2122', '')
     value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode('ascii')
-    value = re.sub(r'[^\w\s-]', '', value.lower())
-    return re.sub(r'[-\s]+', ' ', value).strip()
+    value = re.sub(r'[^\w\s]', '', value.lower())
+    return re.sub(r'\s+', ' ', value).strip()
 
 
-def fetch_steam_app_list():
-    print("Fetching Steam App List...")
-    url = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
+def search_steam(title):
+    safe = urllib.parse.quote(title, safe='')
+    url = f"https://store.steampowered.com/api/storesearch?term={safe}&cc=us&l=en"
+    req = urllib.request.Request(url, headers={
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+    })
     try:
-        res = urllib.request.urlopen(url)
-        data = json.loads(res.read())
-        apps = data['applist']['apps']
-        print(f"Loaded {len(apps)} Steam apps.")
-        return apps
-    except Exception as e:
-        print(f"Failed to fetch Steam apps: {e}")
-        return []
+        with urllib.request.urlopen(req, timeout=10) as res:
+            data = json.loads(res.read())
+            items = data.get('items', [])
+            if not items:
+                return None
 
+            norm_title = normalize(title)
 
-def build_steam_index(apps):
-    index = {}
-    for app in apps:
-        name = app.get('name', '')
-        if name:
-            index[slugify(name)] = app['appid']
-    return index
+            for item in items[:5]:
+                norm_name = normalize(item['name'])
+                if norm_name == norm_title:
+                    return item['id']
 
+            for item in items[:5]:
+                norm_name = normalize(item['name'])
+                if norm_title in norm_name or norm_name in norm_title:
+                    return item['id']
 
-EDITION_RE = re.compile(
-    r'\b(definitive|deluxe|complete|special|ultimate|enhanced|anniversary|'
-    r'remastered|remake|hd|remaster|pixel\s+remaster)\s*(edition|version)?\b'
-)
+            base_title = re.split(r'\s*[:\-\u2013\u2014]\s*', norm_title)[0].strip()
+            if len(base_title) >= 6:
+                for item in items[:3]:
+                    norm_name = normalize(item['name'])
+                    if base_title in norm_name:
+                        return item['id']
 
-
-def match_title(slug, steam_index):
-    if slug in steam_index:
-        return steam_index[slug], "exact"
-
-    if slug.startswith("the "):
-        v = steam_index.get(slug[4:])
-        if v:
-            return v, "no-the"
-
-    clean = EDITION_RE.sub('', slug).strip()
-    clean = re.sub(r'\s+', ' ', clean)
-    if clean != slug and clean in steam_index:
-        return steam_index[clean], "no-edition"
-
-    parts = re.split(r'\s*[:\-\u2013\u2014]\s*', slug)
-    base = parts[0].strip()
-    if len(base) >= 4 and base != slug and base in steam_index:
-        return steam_index[base], "base-title"
-
-    words = slug.split()
-    for n in range(min(5, len(words)), 2, -1):
-        prefix = ' '.join(words[:n])
-        if len(prefix) >= 10 and prefix in steam_index:
-            return steam_index[prefix], "prefix"
-
-    return None, None
+    except Exception:
+        pass
+    return None
 
 
 def get_steam_review_stats(appid):
     url = f"https://store.steampowered.com/app/{appid}/"
-    req = urllib.request.Request(
-        url,
-        headers={
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
-            'Accept-Language': 'en-US,en;q=0.5',
-        }
-    )
+    req = urllib.request.Request(url, headers={
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+        'Accept-Language': 'en-US,en;q=0.5',
+    })
     try:
         with urllib.request.urlopen(req, timeout=10) as res:
             html = res.read().decode('utf-8')
@@ -127,7 +103,7 @@ def main():
             f"%20AND%20language_availability:*english*"
             f"%20AND%20digital_version_b:true"
             f"&sort=popularity%20asc&start={start}&rows={rows}"
-            f"&wt=json&fl={SOLR_FL}"
+            f"&wt=json&fl=title,title_master_s,fs_id"
         )
         res = urllib.request.urlopen(solr_url)
         data = json.loads(res.read())
@@ -139,13 +115,10 @@ def main():
             break
     print(f"Loaded {len(all_games)} Nintendo games.")
 
-    steam_apps = fetch_steam_app_list()
-    steam_index = build_steam_index(steam_apps)
-    print(f"Steam index: {len(steam_index)} unique slugs.")
-
     updates = 0
     save_counter = 0
     skipped = 0
+    not_found = 0
 
     for i, game in enumerate(all_games):
         fs_id = game['fs_id']
@@ -154,9 +127,8 @@ def main():
             continue
 
         title = game.get('title_master_s', game['title'])
-        slug = slugify(title)
 
-        appid, strategy = match_title(slug, steam_index)
+        appid = search_steam(title)
 
         if appid:
             pct, count = get_steam_review_stats(appid)
@@ -170,13 +142,18 @@ def main():
                 }
                 updates += 1
                 save_counter += 1
-                print(f"[{i+1}/{len(all_games)}] {title} -> {pct}% ({count}) [{strategy}]")
-                time.sleep(1.5)
+                print(f"[{i+1}/{len(all_games)}] {title} -> {pct}% ({count})")
             else:
-                print(f"[{i+1}/{len(all_games)}] {title} -> matched AppID {appid} but no reviews [{strategy}]")
+                print(f"[{i+1}/{len(all_games)}] {title} -> AppID {appid} but no reviews")
+            time.sleep(1.5)
+        else:
+            not_found += 1
+            if i < 100 or i % 100 == 0:
+                print(f"[{i+1}/{len(all_games)}] {title} -> not on Steam")
+            time.sleep(0.5)
 
         if save_counter >= SAVE_EVERY:
-            print(f"Saving batch... ({len(existing)} total)")
+            print(f"  Saving batch... ({len(existing)} total, {updates} new)")
             req = urllib.request.Request(
                 f"{BASE_URL}/api/steam",
                 data=json.dumps(existing).encode('utf-8'),
@@ -187,7 +164,7 @@ def main():
                 urllib.request.urlopen(req)
                 save_counter = 0
             except Exception as e:
-                print(f"Save failed: {e}")
+                print(f"  Save failed: {e}")
 
     if save_counter > 0:
         print(f"Final save... ({len(existing)} total)")
@@ -202,7 +179,7 @@ def main():
         except Exception as e:
             print(f"Final save failed: {e}")
 
-    print(f"\nDone. New matches: {updates}, Skipped (existing): {skipped}, Total stored: {len(existing)}")
+    print(f"\nDone. New: {updates}, Skipped: {skipped}, Not found: {not_found}, Total stored: {len(existing)}")
 
 
 if __name__ == "__main__":

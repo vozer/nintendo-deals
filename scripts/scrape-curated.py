@@ -21,10 +21,6 @@ SOURCES = [
 SOLR_BASE = (
     "https://searching.nintendo-europe.com/es/select?"
     "fq=type:GAME%20AND%20system_type:nintendoswitch*"
-    "%20AND%20price_has_discount_b:true"
-    "%20AND%20price_sorting_f:%5B0%20TO%2014.99%5D"
-    "%20AND%20language_availability:*english*"
-    "%20AND%20digital_version_b:true"
     "&rows=5&wt=json&fl=fs_id,title,title_master_s"
 )
 
