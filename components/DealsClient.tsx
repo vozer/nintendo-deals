@@ -3,13 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { NintendoGame, Preferences, SortOption, RatingsMap, MediaMap, SteamRatingsMap, CuratedMap } from '@/lib/types';
 import { classifyGame, hasBlockedSteamTags } from '@/lib/filters';
-import { bayesianScore, computeGlobalMean, CONFIDENT_THRESHOLD } from '@/lib/sort-utils';
+import { bayesianScore, computeGlobalMean, CONFIDENT_THRESHOLD, computeShovelwareScore, SHOVELWARE_THRESHOLD } from '@/lib/sort-utils';
 import GameCard from './GameCard';
 import GameDetailModal from './GameDetailModal';
 import SearchBar from './SearchBar';
 import SortSelect from './SortSelect';
 
-type ViewTab = 'deals' | 'collections' | 'sports' | 'thinking' | 'hidden' | 'watched' | 'low_confidence';
+type ViewTab = 'deals' | 'collections' | 'sports' | 'thinking' | 'hidden' | 'watched' | 'low_confidence' | 'shovelware';
 
 const DEFAULT_PREFS: Preferences = { hiddenGames: [], watchGames: {}, thinkingAbout: [] };
 
@@ -35,6 +35,8 @@ export default function DealsClient() {
   const [collectionsLoaded, setCollectionsLoaded] = useState(false);
   const [sportsLoaded, setSportsLoaded] = useState(false);
   const [visibleCount, setVisibleCount] = useState(48);
+  const [excludedTags, setExcludedTags] = useState<Set<string>>(new Set());
+  const [showTagFilter, setShowTagFilter] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   const isClientSort = sort === 'rating' || sort === 'value';
@@ -196,7 +198,7 @@ export default function DealsClient() {
       (entries) => {
         if (!entries[0].isIntersecting || loadingMore || loading) return;
 
-        if (isClientSort && (activeTab === 'deals' || activeTab === 'low_confidence')) {
+        if (isClientSort && (activeTab === 'deals' || activeTab === 'low_confidence' || activeTab === 'shovelware')) {
           setVisibleCount((prev) => prev + 48);
           return;
         }
@@ -205,7 +207,8 @@ export default function DealsClient() {
           (activeTab === 'deals' && allGames.length < allTotal) ||
           (activeTab === 'collections' && collectionGames.length < collectionTotal) ||
           (activeTab === 'sports' && sportsGames.length < sportsTotal) ||
-          (activeTab === 'low_confidence' && allGames.length < allTotal);
+          (activeTab === 'low_confidence' && allGames.length < allTotal) ||
+          (activeTab === 'shovelware' && allGames.length < allTotal);
         if (!canFetchMore) return;
 
         if (activeTab === 'collections') fetchCollections(collectionGames.length, true);
@@ -284,6 +287,33 @@ export default function DealsClient() {
     window.location.href = '/login';
   }
 
+  const availableTags = useMemo(() => {
+    const tagCounts = new Map<string, number>();
+    for (const s of Object.values(steamRatings)) {
+      for (const t of s.tags ?? []) {
+        tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1);
+      }
+    }
+    return [...tagCounts.entries()]
+      .filter(([, c]) => c >= 5)
+      .sort((a, b) => b[1] - a[1])
+      .map(([tag, count]) => ({ tag, count }));
+  }, [steamRatings]);
+
+  function toggleTag(tag: string) {
+    setExcludedTags(prev => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
+  }
+
+  function hasExcludedTag(tags?: string[]): boolean {
+    if (!tags || excludedTags.size === 0) return false;
+    return tags.some(t => excludedTags.has(t));
+  }
+
   const dealsGames = useMemo(() => {
     return allGames.filter((game) => {
       const cls = classifyGame(game);
@@ -295,6 +325,9 @@ export default function DealsClient() {
 
       const s = steamRatings[game.fs_id];
       if (hasBlockedSteamTags(s?.tags)) return false;
+      if (hasExcludedTag(s?.tags)) return false;
+
+      if (computeShovelwareScore(game, s, ratings[game.fs_id]) >= SHOVELWARE_THRESHOLD) return false;
 
       const isCurated = game.fs_id in curatedMap;
       if (isCurated) return true;
@@ -305,7 +338,8 @@ export default function DealsClient() {
 
       return true;
     });
-  }, [allGames, preferences, ratings, steamRatings, curatedMap]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allGames, preferences, ratings, steamRatings, curatedMap, excludedTags]);
 
   const lowConfidenceGames = useMemo(() => {
     return allGames.filter((game) => {
@@ -316,14 +350,31 @@ export default function DealsClient() {
 
       const s = steamRatings[game.fs_id];
       if (hasBlockedSteamTags(s?.tags)) return false;
+      if (hasExcludedTag(s?.tags)) return false;
 
       if (game.fs_id in curatedMap) return false;
+
+      if (computeShovelwareScore(game, s, ratings[game.fs_id]) >= SHOVELWARE_THRESHOLD) return false;
 
       const r = ratings[game.fs_id];
       const totalVotes = (r?.rating_count ?? 0) + (s?.votes ?? 0);
       return totalVotes < CONFIDENT_THRESHOLD;
     });
-  }, [allGames, preferences, ratings, steamRatings, curatedMap]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allGames, preferences, ratings, steamRatings, curatedMap, excludedTags]);
+
+  const shovelwareGames = useMemo(() => {
+    return allGames.filter((game) => {
+      const cls = classifyGame(game);
+      if (cls !== 'deals') return false;
+      if (preferences.hiddenGames.includes(game.fs_id)) return false;
+
+      const s = steamRatings[game.fs_id];
+      if (hasBlockedSteamTags(s?.tags)) return false;
+
+      return computeShovelwareScore(game, s, ratings[game.fs_id]) >= SHOVELWARE_THRESHOLD;
+    });
+  }, [allGames, preferences, ratings, steamRatings]);
 
   const hiddenCount = preferences.hiddenGames.length;
   const watchedCount = Object.keys(preferences.watchGames).length;
@@ -355,10 +406,12 @@ export default function DealsClient() {
         return allGames.filter((g) => g.fs_id in preferences.watchGames);
       case 'low_confidence':
         return lowConfidenceGames;
+      case 'shovelware':
+        return shovelwareGames;
       default:
         return [];
     }
-  }, [activeTab, dealsGames, collectionGames, sportsGames, allGames, preferences]);
+  }, [activeTab, dealsGames, collectionGames, sportsGames, allGames, preferences, lowConfidenceGames, shovelwareGames]);
 
   const globalMean = useMemo(() => computeGlobalMean(ratings), [ratings]);
 
@@ -411,14 +464,15 @@ export default function DealsClient() {
     return [...curated, ...sortedNonCurated];
   }, [tabGames, sort, ratings, steamRatings, globalMean, isClientSort, curatedMap]);
 
-  const displayGames = isClientSort && activeTab === 'deals'
+  const clientSortedTab = isClientSort && (activeTab === 'deals' || activeTab === 'low_confidence' || activeTab === 'shovelware');
+  const displayGames = clientSortedTab
     ? sortedGames.slice(0, visibleCount)
     : sortedGames;
 
   const canLoadMore =
-    (activeTab === 'deals' || activeTab === 'collections' || activeTab === 'sports' || activeTab === 'low_confidence') &&
+    (activeTab === 'deals' || activeTab === 'collections' || activeTab === 'sports' || activeTab === 'low_confidence' || activeTab === 'shovelware') &&
     (() => {
-      if (isClientSort && (activeTab === 'deals' || activeTab === 'low_confidence')) return visibleCount < sortedGames.length;
+      if (clientSortedTab) return visibleCount < sortedGames.length;
       if (activeTab === 'collections') return collectionGames.length < collectionTotal;
       if (activeTab === 'sports') return sportsGames.length < sportsTotal;
       return allGames.length < allTotal;
@@ -432,6 +486,7 @@ export default function DealsClient() {
     { id: 'hidden', label: 'Hidden', count: hiddenCount },
     { id: 'watched', label: 'Watched', count: watchedCount },
     { id: 'low_confidence', label: 'Few Reviews', count: lowConfidenceGames.length },
+    { id: 'shovelware', label: 'Low Quality', count: shovelwareGames.length },
   ];
 
   return (
@@ -452,6 +507,50 @@ export default function DealsClient() {
         <SearchBar value={search} onChange={setSearch} />
         <SortSelect value={sort} onChange={setSort} />
       </div>
+
+      {activeTab === 'deals' && (
+        <div className="bg-white px-4 sm:px-8 border-b border-gray-100">
+          <button
+            onClick={() => setShowTagFilter(!showTagFilter)}
+            className="flex items-center gap-2 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+            Tag Filters
+            {excludedTags.size > 0 && (
+              <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">{excludedTags.size}</span>
+            )}
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${showTagFilter ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          {showTagFilter && (
+            <div className="pb-3 space-y-2">
+              <p className="text-xs text-gray-400">Click tags to exclude games with those tags from Deals</p>
+              <div className="flex flex-wrap gap-1.5">
+                {availableTags.slice(0, 60).map(({ tag, count }) => (
+                  <button
+                    key={tag}
+                    onClick={() => toggleTag(tag)}
+                    className={`text-xs px-2 py-1 rounded-full border transition-colors ${
+                      excludedTags.has(tag)
+                        ? 'bg-red-50 border-red-300 text-red-700 line-through'
+                        : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300'
+                    }`}
+                  >
+                    {tag} <span className="text-gray-400">({count})</span>
+                  </button>
+                ))}
+              </div>
+              {excludedTags.size > 0 && (
+                <button
+                  onClick={() => setExcludedTags(new Set())}
+                  className="text-xs text-red-500 hover:text-red-700 underline"
+                >
+                  Clear all tag filters
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="bg-white px-4 sm:px-8 border-b border-gray-100 overflow-x-auto">
         <div className="flex gap-1 min-w-max">
@@ -511,6 +610,7 @@ export default function DealsClient() {
                activeTab === 'thinking' ? 'No games saved to think about yet.' :
                activeTab === 'collections' ? 'No collections on sale right now.' :
                activeTab === 'sports' ? 'No sports games on sale right now.' :
+               activeTab === 'shovelware' ? 'No low-quality games detected.' :
                'No games match your filters.'}
             </p>
           </div>
@@ -560,6 +660,14 @@ export default function DealsClient() {
               <div className="mt-6 p-4 bg-blue-50 rounded-xl">
                 <p className="text-sm text-blue-700">
                   Games you&apos;re considering. They&apos;re hidden from the Deals tab while bookmarked. Click the bookmark again to remove.
+                </p>
+              </div>
+            )}
+
+            {activeTab === 'shovelware' && displayGames.length > 0 && (
+              <div className="mt-6 p-4 bg-orange-50 rounded-xl">
+                <p className="text-sm text-orange-700">
+                  Games detected as low-quality based on a composite score: low Steam reviews, few votes, shovelware publisher, educational/lifestyle category, and low price. These are hidden from the Deals tab.
                 </p>
               </div>
             )}

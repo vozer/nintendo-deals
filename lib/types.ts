@@ -10,6 +10,7 @@ export interface NintendoGame {
   excerpt: string;
   url: string;
   pretty_game_categories_txt: string[];
+  game_categories_txt?: string[];
   publisher: string;
   system_names_txt: string[];
   pretty_agerating_s: string;

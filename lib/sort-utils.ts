@@ -1,7 +1,61 @@
-import { RatingsMap } from './types';
+import { GameRating, NintendoGame, RatingsMap, SteamRating } from './types';
 
 const MIN_VOTES = 10;
 export const CONFIDENT_THRESHOLD = 100;
+export const SHOVELWARE_THRESHOLD = 6;
+
+const SHOVELWARE_PUBLISHERS = new Set([
+  'Dead Drop Studios', 'D3PUBLISHER', 'Ocean Media',
+  'Pix Arts', 'Graffiti Games', 'Sabec',
+]);
+
+const KIDDIE_TAGS = new Set([
+  'Educational', 'Kids', 'Family Friendly', 'Cute', 'Casual', 'Relaxing',
+  'Colorful', 'Cartoony', 'Wholesome', 'Clicker', 'Match 3', 'Hidden Object',
+  'Cats', 'Cozy', 'Simple',
+]);
+const CORE_TAGS = new Set([
+  'Horror', 'Difficult', 'Story Rich', 'Atmospheric', 'Psychological Horror',
+  'RPG', 'Shooter', 'Strategy', 'Dark', 'Sci-fi', 'Mystery', 'Survival',
+  'Metroidvania', 'Souls-like', 'Action-Adventure', 'Hack and Slash',
+  'Stealth', 'Tactical', 'Turn-Based Strategy', 'Management',
+]);
+
+export function computeShovelwareScore(
+  game: NintendoGame,
+  steam?: SteamRating,
+  igdb?: GameRating,
+): number {
+  let score = 0;
+  const tags = steam?.tags ?? [];
+  const votes = steam?.votes ?? 0;
+  const pct = steam?.score_pct ?? 0;
+
+  if (votes > 0 && pct < 70) score += 2;
+  else if (votes > 0 && pct < 80) score += 1;
+
+  if (votes === 0) score += 3;
+  else if (votes < 20) score += 3;
+  else if (votes < 50) score += 2;
+  else if (votes < 100) score += 1;
+
+  const kidCount = tags.filter(t => KIDDIE_TAGS.has(t)).length;
+  const coreCount = tags.filter(t => CORE_TAGS.has(t)).length;
+  const kiddieNet = kidCount - coreCount;
+  if (kiddieNet >= 3) score += 2;
+  else if (kiddieNet >= 2) score += 1;
+
+  if (game.price_discounted_f < 1.5) score += 1;
+  else if (game.price_discounted_f < 3) score += 0.5;
+
+  if (SHOVELWARE_PUBLISHERS.has(game.publisher)) score += 2;
+
+  const cats = game.game_categories_txt ?? [];
+  if (cats.includes('education')) score += 2;
+  if (cats.includes('lifestyle')) score += 1;
+
+  return score;
+}
 
 export function normalizeTitle(title: string): string {
   return title
