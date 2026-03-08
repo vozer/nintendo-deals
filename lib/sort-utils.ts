@@ -1,6 +1,7 @@
 import { RatingsMap } from './types';
 
-const MIN_VOTES = 5;
+const MIN_VOTES = 10;
+export const CONFIDENT_THRESHOLD = 10;
 
 export function computeGlobalMean(ratings: RatingsMap): number {
   let sum = 0;
@@ -17,6 +18,7 @@ export function computeGlobalMean(ratings: RatingsMap): number {
 /**
  * Bayesian average: dampens ratings toward global mean based on review count.
  * B(r) = (v / (v + m)) * R + (m / (v + m)) * C
+ * m=10 ensures games need ~10+ reviews to meaningfully diverge from mean.
  * Returns -1 for unrated games.
  */
 export function bayesianScore(

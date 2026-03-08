@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.6.0] - 2026-03-08
+
+### Changed
+
+- **Tiered sorting** — games with 10+ reviews (confident) shown first in rating/value sorts; games with fewer reviews appear after; unrated games last
+- **Bayesian m raised to 10** — games need ~10+ reviews to meaningfully diverge from global mean (was m=5)
+- **Default sort changed to Best Value** — combines 70% Bayesian score + 30% price score (cheaper = better)
+- **Value sort reordered** — "Best Value ★/€" is now first option in dropdown, "Top Rated ★" second
+- **Expanded dating filter** — catches Date Z, Date Everything, boyfriend/girlfriend/otome/waifu/harem titles
+
 ## [1.5.0] - 2026-03-08
 
 ### Changed
