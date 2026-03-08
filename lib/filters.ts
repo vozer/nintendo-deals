@@ -1,6 +1,6 @@
 import { NintendoGame } from './types';
 
-const BLOCKED_TITLE_RE = /\b(hentai)\b/i;
+const BLOCKED_TITLE_RE = /\b(hentai|pretty\s+girls|mahjong|solitaire|jigsaw\s+puzzle)\b/i;
 const DATING_CONTEXT_RE = /\b(dating|dates?\s+(boys?|girls?|sim|everything|simulator|z\b)|date\s+(z|everything)|blind\s+dates?|love\s+&?\s*horoscope\s+dating|sexy\s+halloween|romantic\s+date|romantic\b.*\bdate|date\s+with\b|zodiac\s+date|romance\b.*\b(boys?|anime)|boyfriend|girlfriend|otome|waifu|harem)\b/i;
 const COLLECTION_RE = /\b(collection|bundle|\d+\s*in\s*1|mega\s+pack)\b/i;
 const SPORTS_CATEGORY = 'Deportes';

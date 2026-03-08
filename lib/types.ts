@@ -72,3 +72,15 @@ export interface GameVideo {
 }
 
 export type MediaMap = Record<string, GameMedia>;
+
+export interface SteamRating {
+  steam_id: number;
+  score_pct: number;
+  votes: number;
+  url: string;
+  matched_title: string;
+}
+
+export type SteamRatingsMap = Record<string, SteamRating>;
+
+export type CuratedList = string[]; // List of curated game titles (fs_id is harder to match from external sites)

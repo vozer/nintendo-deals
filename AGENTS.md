@@ -154,6 +154,9 @@ Collections and Sports tabs fetch directly from Nintendo Solr API with tab-speci
 - Bayesian average: `B = (v/(v+m))×R + (m/(v+m))×C` where m=10, C=global mean (~68.8), dampens low-review outliers
 - Tiered sorting: confident (10+ reviews) first, then low-review, then unrated
 - Default sort: Best Value (70% Bayesian + 30% price score)
+- Steam Ratings: fetched via public API (`scripts/steam-backfill.py`), stored in `steam_ratings.json`
+- Curated Lists: scraped from NintendoLife (`scripts/scrape-curated.py`), stored in `curated.json`
+- "Few Reviews" tab: isolates low-confidence games
 - `lib/sort-utils.ts`: `bayesianScore()` and `computeGlobalMean()` utilities
 - Virtual scroll for rating/value sorts: 48 at a time from full sorted array in memory
 

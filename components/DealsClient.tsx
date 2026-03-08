@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { NintendoGame, Preferences, SortOption, RatingsMap, MediaMap } from '@/lib/types';
+import { NintendoGame, Preferences, SortOption, RatingsMap, MediaMap, SteamRatingsMap, CuratedList } from '@/lib/types';
 import { classifyGame } from '@/lib/filters';
 import { bayesianScore, computeGlobalMean, CONFIDENT_THRESHOLD } from '@/lib/sort-utils';
 import GameCard from './GameCard';
@@ -9,7 +9,7 @@ import GameDetailModal from './GameDetailModal';
 import SearchBar from './SearchBar';
 import SortSelect from './SortSelect';
 
-type ViewTab = 'deals' | 'collections' | 'sports' | 'thinking' | 'hidden' | 'watched';
+type ViewTab = 'deals' | 'collections' | 'sports' | 'thinking' | 'hidden' | 'watched' | 'low_confidence';
 
 const DEFAULT_PREFS: Preferences = { hiddenGames: [], watchGames: {}, thinkingAbout: [] };
 
@@ -23,6 +23,8 @@ export default function DealsClient() {
   const [preferences, setPreferences] = useState<Preferences>(DEFAULT_PREFS);
   const [ratings, setRatings] = useState<RatingsMap>({});
   const [media, setMedia] = useState<MediaMap>({});
+  const [steamRatings, setSteamRatings] = useState<SteamRatingsMap>({});
+  const [curatedList, setCuratedList] = useState<CuratedList>([]);
   const [detailGame, setDetailGame] = useState<NintendoGame | null>(null);
   const [sort, setSort] = useState<SortOption>('value');
   const [search, setSearch] = useState('');
@@ -141,10 +143,36 @@ export default function DealsClient() {
     }
   }, []);
 
+  const fetchSteam = useCallback(async () => {
+    try {
+      const res = await fetch('/api/steam');
+      if (res.ok) {
+        const data = await res.json();
+        setSteamRatings(data);
+      }
+    } catch {
+      // continue
+    }
+  }, []);
+
+  const fetchCurated = useCallback(async () => {
+    try {
+      const res = await fetch('/api/curated');
+      if (res.ok) {
+        const data = await res.json();
+        setCuratedList(data);
+      }
+    } catch {
+      // continue
+    }
+  }, []);
+
   useEffect(() => { fetchMainGames(); }, [fetchMainGames]);
   useEffect(() => { fetchPreferences(); }, [fetchPreferences]);
   useEffect(() => { fetchRatings(); }, [fetchRatings]);
   useEffect(() => { fetchMedia(); }, [fetchMedia]);
+  useEffect(() => { fetchSteam(); }, [fetchSteam]);
+  useEffect(() => { fetchCurated(); }, [fetchCurated]);
 
   useEffect(() => {
     if (activeTab === 'collections' && !collectionsLoaded) fetchCollections();
@@ -168,7 +196,7 @@ export default function DealsClient() {
       (entries) => {
         if (!entries[0].isIntersecting || loadingMore || loading) return;
 
-        if (isClientSort && activeTab === 'deals') {
+        if (isClientSort && (activeTab === 'deals' || activeTab === 'low_confidence')) {
           setVisibleCount((prev) => prev + 48);
           return;
         }
@@ -176,7 +204,8 @@ export default function DealsClient() {
         const canFetchMore =
           (activeTab === 'deals' && allGames.length < allTotal) ||
           (activeTab === 'collections' && collectionGames.length < collectionTotal) ||
-          (activeTab === 'sports' && sportsGames.length < sportsTotal);
+          (activeTab === 'sports' && sportsGames.length < sportsTotal) ||
+          (activeTab === 'low_confidence' && allGames.length < allTotal);
         if (!canFetchMore) return;
 
         if (activeTab === 'collections') fetchCollections(collectionGames.length, true);
@@ -263,9 +292,36 @@ export default function DealsClient() {
       if (preferences.thinkingAbout?.includes(game.fs_id)) return false;
       const w = preferences.watchGames[game.fs_id];
       if (w && game.price_discounted_f >= w.threshold) return false;
+
+      // Filter low confidence (few reviews) unless curated
+      const r = ratings[game.fs_id];
+      const isCurated = curatedList.some(t => game.title.includes(t)); // Simple inclusion match
+      // Also consider steam rating as confidence booster?
+      // For now, stick to user rule: "if it has Few reviews warning (filter out completely in its own tab)"
+      // Current "Few reviews" logic is rating_count <= 1 (from old GameCard).
+      // But we want to filter < 10.
+      if (!isCurated && (r?.rating_count ?? 0) < CONFIDENT_THRESHOLD) return false;
+
       return true;
     });
-  }, [allGames, preferences]);
+  }, [allGames, preferences, ratings, curatedList]);
+
+  // Games for the new Low Confidence tab
+  const lowConfidenceGames = useMemo(() => {
+    return allGames.filter((game) => {
+      const cls = classifyGame(game);
+      if (cls !== 'deals') return false;
+      // Don't show hidden/thinking
+      if (preferences.hiddenGames.includes(game.fs_id)) return false;
+      if (preferences.thinkingAbout?.includes(game.fs_id)) return false;
+      
+      const r = ratings[game.fs_id];
+      const isCurated = curatedList.some(t => game.title.includes(t));
+      // Show ONLY low confidence here (and not curated)
+      if (!isCurated && (r?.rating_count ?? 0) < CONFIDENT_THRESHOLD) return true;
+      return false;
+    });
+  }, [allGames, preferences, ratings, curatedList]);
 
   const hiddenCount = preferences.hiddenGames.length;
   const watchedCount = Object.keys(preferences.watchGames).length;
@@ -295,6 +351,8 @@ export default function DealsClient() {
         return allGames.filter((g) => preferences.hiddenGames.includes(g.fs_id));
       case 'watched':
         return allGames.filter((g) => g.fs_id in preferences.watchGames);
+      case 'low_confidence':
+        return lowConfidenceGames;
       default:
         return [];
     }
@@ -308,9 +366,32 @@ export default function DealsClient() {
     const maxPrice = 15;
     const scored = tabGames.map((game) => {
       const r = ratings[game.fs_id];
+      const s = steamRatings[game.fs_id];
+      const isCurated = curatedList.some(t => game.title.includes(t));
+      
       const rc = r?.rating_count ?? 0;
-      const bs = bayesianScore(r?.total_rating, rc, globalMean);
-      const confident = rc >= CONFIDENT_THRESHOLD && bs >= 0;
+      let bs = bayesianScore(r?.total_rating, rc, globalMean);
+      
+      // Blend Steam score if available
+      // Steam % positive is roughly comparable to 0-100 score
+      if (s) {
+        const steamBs = bayesianScore(s.score_pct, s.votes, globalMean);
+        if (bs >= 0 && steamBs >= 0) {
+          bs = (bs + steamBs) / 2;
+        } else if (steamBs >= 0) {
+          bs = steamBs;
+        }
+      }
+      
+      // Curated boost
+      if (isCurated && bs >= 0) {
+        bs += 20; // Massive boost for curated games
+      }
+
+      // Confidence check: IGDB count OR Steam count
+      const totalVotes = rc + (s?.votes ?? 0);
+      const confident = totalVotes >= CONFIDENT_THRESHOLD && bs >= 0;
+      
       const priceScore = (1 - game.price_discounted_f / maxPrice) * 100;
       const val = bs >= 0 ? bs * 0.7 + priceScore * 0.3 : -1;
       return { game, bs, rc, confident, val };
@@ -339,9 +420,9 @@ export default function DealsClient() {
     : sortedGames;
 
   const canLoadMore =
-    (activeTab === 'deals' || activeTab === 'collections' || activeTab === 'sports') &&
+    (activeTab === 'deals' || activeTab === 'collections' || activeTab === 'sports' || activeTab === 'low_confidence') &&
     (() => {
-      if (isClientSort && activeTab === 'deals') return visibleCount < sortedGames.length;
+      if (isClientSort && (activeTab === 'deals' || activeTab === 'low_confidence')) return visibleCount < sortedGames.length;
       if (activeTab === 'collections') return collectionGames.length < collectionTotal;
       if (activeTab === 'sports') return sportsGames.length < sportsTotal;
       return allGames.length < allTotal;
@@ -354,6 +435,7 @@ export default function DealsClient() {
     { id: 'thinking', label: 'Thinking', count: thinkingCount },
     { id: 'hidden', label: 'Hidden', count: hiddenCount },
     { id: 'watched', label: 'Watched', count: watchedCount },
+    { id: 'low_confidence', label: 'Few Reviews', count: lowConfidenceGames.length },
   ];
 
   return (

@@ -1,13 +1,15 @@
 'use client';
 
-import { NintendoGame, Preferences, GameRating, GameMedia } from '@/lib/types';
+import { NintendoGame, Preferences, GameRating, GameMedia, SteamRating } from '@/lib/types';
 import { bayesianScore } from '@/lib/sort-utils';
 
 interface GameCardProps {
   game: NintendoGame;
   preferences: Preferences;
   rating?: GameRating;
+  steam?: SteamRating;
   media?: GameMedia;
+  isCurated?: boolean;
   globalMean?: number;
   onHide: (gameId: string) => void;
   onWatch: (gameId: string, threshold: 2 | 5 | 10, title: string) => void;
@@ -64,11 +66,22 @@ function ratingBg(score: number): string {
   return 'bg-red-50';
 }
 
-export default function GameCard({ game, preferences, rating, media, globalMean, onHide, onWatch, hideLabel = 'Hide', onUnwatch, onOpenDetail, onThink }: GameCardProps) {
+export default function GameCard({ game, preferences, rating, steam, media, isCurated, globalMean, onHide, onWatch, hideLabel = 'Hide', onUnwatch, onOpenDetail, onThink }: GameCardProps) {
   const watchEntry = preferences.watchGames[game.fs_id];
-  const bs = globalMean != null && rating
+  
+  // Calculate display score (blended if steam available)
+  let bs = globalMean != null && rating
     ? bayesianScore(rating.total_rating, rating.rating_count ?? 0, globalMean)
     : undefined;
+    
+  if (steam && globalMean != null) {
+    const steamBs = bayesianScore(steam.score_pct, steam.votes, globalMean);
+    if (bs != null && bs >= 0 && steamBs >= 0) {
+      bs = (bs + steamBs) / 2;
+    } else if (steamBs >= 0) {
+      bs = steamBs;
+    }
+  }
 
   const imageUrl = game.image_url_h2x1_s || game.image_url_h16x9_s || game.image_url_sq_s;
   const nintendoUrl = `https://www.nintendo.com${game.url}`;
@@ -93,19 +106,30 @@ export default function GameCard({ game, preferences, rating, media, globalMean,
         <div className="absolute top-2 right-2 bg-[#E60012] text-white text-xs font-bold px-2 py-1 rounded-lg">
           -{Math.round(game.price_discount_percentage_f)}%
         </div>
-        {rating && rating.total_rating != null && (
+        {isCurated && (
+          <div className="absolute top-2 left-2 bg-yellow-400 text-yellow-900 text-xs font-bold px-2 py-1 rounded-lg flex items-center gap-1 shadow-sm z-10">
+            <span>🏆 Curated</span>
+          </div>
+        )}
+        {(rating && rating.total_rating != null) || steam ? (
           <div
-            className={`absolute top-2 left-2 ${ratingBg(bs != null && bs >= 0 ? bs : rating.total_rating)} backdrop-blur-sm text-xs font-bold px-2 py-1 rounded-lg flex items-center gap-1`}
-            title={bs != null && bs >= 0 ? `Bayesian: ${Math.round(bs)} (raw ${Math.round(rating.total_rating)}, ${rating.rating_count} reviews)` : `Rating: ${Math.round(rating.total_rating)}`}
+            className={`absolute top-2 ${isCurated ? 'left-24' : 'left-2'} ${ratingBg(bs != null && bs >= 0 ? bs : (rating?.total_rating ?? 0))} backdrop-blur-sm text-xs font-bold px-2 py-1 rounded-lg flex items-center gap-1`}
+            title={bs != null && bs >= 0 ? `Score: ${Math.round(bs)}` : `Rating`}
           >
-            <span className={ratingColor(bs != null && bs >= 0 ? bs : rating.total_rating)}>
-              ★ {Math.round(bs != null && bs >= 0 ? bs : rating.total_rating)}
+            <span className={ratingColor(bs != null && bs >= 0 ? bs : (rating?.total_rating ?? 0))}>
+              ★ {Math.round(bs != null && bs >= 0 ? bs : (rating?.total_rating ?? 0))}
             </span>
-            {rating.rating_count > 0 && (
+            {(rating?.rating_count ?? 0) > 0 && (
               <span className="text-[10px] font-medium text-gray-500">
-                · {rating.rating_count}
+                · {rating?.rating_count}
               </span>
             )}
+          </div>
+        ) : null}
+        {steam && (
+          <div className="absolute top-10 left-2 bg-black/60 backdrop-blur-sm text-white text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1">
+            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M11.979 0C5.668 0 .504 4.936.034 11.134l5.856 2.426 1.76-1.76c-.052-.365-.022-.75.127-1.116.328-.802 1.259-1.191 2.061-.864l2.56-3.66c-.07-.31-.06-.636.052-.942.417-1.018 1.597-1.512 2.615-1.095 1.019.417 1.513 1.596 1.096 2.615-.417 1.018-1.597 1.512-2.615 1.095-.54-.22-.916-.683-1.07-1.188l-2.66 3.804c.28.272.5.61.622 1.002.327.802-.062 1.733-.864 2.06-.802.328-1.733-.062-2.06-.863-.12-.293-.142-.598-.086-.893l-4.757-1.97c1.558 4.28 5.626 7.33 10.59 7.33 6.627 0 12-5.373 12-12S18.606 0 11.979 0z"/></svg>
+            {steam.score_pct}% ({steam.votes >= 1000 ? (steam.votes/1000).toFixed(1) + 'k' : steam.votes})
           </div>
         )}
         {media && (media.screenshots.length > 0 || media.videos?.some((v) => v.type === 'youtube')) && (

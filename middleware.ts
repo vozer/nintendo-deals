@@ -8,7 +8,9 @@ export function middleware(request: NextRequest) {
     pathname.startsWith('/api/auth') ||
     pathname.startsWith('/api/ratings') ||
     pathname.startsWith('/api/preferences') ||
-    pathname.startsWith('/api/media')
+    pathname.startsWith('/api/media') ||
+    pathname.startsWith('/api/steam') ||
+    pathname.startsWith('/api/curated')
   ) {
     return NextResponse.next();
   }
