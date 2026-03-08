@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.7.1] - 2026-03-08
+
+### Fixed
+
+- **Steam backfill script** — rewrote to use Steam Store Search API (bulk GetAppList v2 is down), multi-strategy title matching now achieves ~60% hit rate
+- **Curated scraper** — proper `<h3>` parsing from NintendoLife, fs_id matching via Solr API, review text extraction (48/50 games matched)
+- **GameCard props** — `steam` and `isCurated` props now passed from DealsClient (badges render correctly)
+- **Curated title matching** — uses fs_id-keyed `CuratedMap` instead of brittle `title.includes()` on string array
+
+### Changed
+
+- **Curated data structure** — from `string[]` to `Record<fs_id, CuratedEntry>` with title, review text, source URL, and rank
+- **Curated games pinned to top** — always appear above sorted games in Deals tab, sorted by NintendoLife rank
+- **Detail modal** — shows NintendoLife review text for curated games in a yellow callout box
+- **Confidence threshold** — raised from 10 to 100 (sum of IGDB + Steam votes)
+- **`normalizeTitle()` utility** — diacritic-stripped, case-insensitive comparison for consistent matching
+
 ## [1.7.0] - 2026-03-08
 
 ### Added

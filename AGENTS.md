@@ -49,7 +49,7 @@ npm run dev
 
 | File | Purpose |
 |------|---------|
-| `middleware.ts` | Auth middleware — redirects unauthenticated users to /login (bypasses /api/ratings, /api/preferences, /api/media) |
+| `middleware.ts` | Auth middleware — redirects unauthenticated users to /login (bypasses /api/ratings, /api/preferences, /api/media, /api/steam, /api/curated) |
 | `lib/nintendo-api.ts` | Solr query builder with base filters, sort mapping, and tab-specific queries |
 | `lib/blob-storage.ts` | Vercel Blob read/write for preferences.json |
 | `lib/ratings-storage.ts` | Vercel Blob read/write for ratings.json |
@@ -152,12 +152,13 @@ Collections and Sports tabs fetch directly from Nintendo Solr API with tab-speci
 - IGDB matching uses `title_master_s` from Nintendo API (English titles) for better coverage
 - Rating/value sorts fetch ALL games (paginating Solr's 1000-row cap) for true full-catalog sorting
 - Bayesian average: `B = (v/(v+m))×R + (m/(v+m))×C` where m=10, C=global mean (~68.8), dampens low-review outliers
-- Tiered sorting: confident (10+ reviews) first, then low-review, then unrated
+- Tiered sorting: confident (100+ total reviews) first, then low-review, then unrated
+- Confidence threshold: 100 total votes (sum of IGDB rating_count + Steam votes)
 - Default sort: Best Value (70% Bayesian + 30% price score)
-- Steam Ratings: fetched via public API (`scripts/steam-backfill.py`), stored in `steam_ratings.json`
-- Curated Lists: scraped from NintendoLife (`scripts/scrape-curated.py`), stored in `curated.json`
-- "Few Reviews" tab: isolates low-confidence games
-- `lib/sort-utils.ts`: `bayesianScore()` and `computeGlobalMean()` utilities
+- Steam Ratings: fetched via Steam Store Search API (`scripts/steam-backfill.py`), stored in `steam_ratings.json`, ~60% match rate
+- Curated Deals: scraped from NintendoLife (`scripts/scrape-curated.py`), stored as `CuratedMap` in `curated.json` (keyed by fs_id, includes review text, rank, source URL). 48/50 top games matched. Curated games pinned to top of Deals tab.
+- "Few Reviews" tab: isolates games with < 100 total reviews (IGDB + Steam combined)
+- `lib/sort-utils.ts`: `bayesianScore()`, `computeGlobalMean()`, `normalizeTitle()` utilities
 - Virtual scroll for rating/value sorts: 48 at a time from full sorted array in memory
 
 ## Critical Rules
