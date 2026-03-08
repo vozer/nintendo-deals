@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { NintendoGame, Preferences, SortOption, RatingsMap, MediaMap } from '@/lib/types';
 import { classifyGame } from '@/lib/filters';
-import { bayesianScore, computeGlobalMean } from '@/lib/sort-utils';
+import { bayesianScore, computeGlobalMean, CONFIDENT_THRESHOLD } from '@/lib/sort-utils';
 import GameCard from './GameCard';
 import GameDetailModal from './GameDetailModal';
 import SearchBar from './SearchBar';
@@ -24,7 +24,7 @@ export default function DealsClient() {
   const [ratings, setRatings] = useState<RatingsMap>({});
   const [media, setMedia] = useState<MediaMap>({});
   const [detailGame, setDetailGame] = useState<NintendoGame | null>(null);
-  const [sort, setSort] = useState<SortOption>('popularity');
+  const [sort, setSort] = useState<SortOption>('value');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -305,35 +305,33 @@ export default function DealsClient() {
   const sortedGames = useMemo((): NintendoGame[] => {
     if (!isClientSort) return tabGames;
 
+    const maxPrice = 15;
     const scored = tabGames.map((game) => {
       const r = ratings[game.fs_id];
-      return {
-        game,
-        bs: bayesianScore(r?.total_rating, r?.rating_count ?? 0, globalMean),
-      };
+      const rc = r?.rating_count ?? 0;
+      const bs = bayesianScore(r?.total_rating, rc, globalMean);
+      const confident = rc >= CONFIDENT_THRESHOLD && bs >= 0;
+      const priceScore = (1 - game.price_discounted_f / maxPrice) * 100;
+      const val = bs >= 0 ? bs * 0.7 + priceScore * 0.3 : -1;
+      return { game, bs, rc, confident, val };
     });
 
-    if (sort === 'rating') {
-      scored.sort((a, b) => {
-        if (a.bs >= 0 && b.bs < 0) return -1;
-        if (a.bs < 0 && b.bs >= 0) return 1;
-        if (a.bs < 0 && b.bs < 0) return 0;
-        return b.bs - a.bs;
-      });
-    } else {
-      scored.sort((a, b) => {
-        if (a.bs >= 0 && b.bs < 0) return -1;
-        if (a.bs < 0 && b.bs >= 0) return 1;
-        if (a.bs < 0 && b.bs < 0) {
-          return a.game.price_discounted_f - b.game.price_discounted_f;
-        }
-        const valA = a.bs / Math.max(a.game.price_discounted_f, 0.01);
-        const valB = b.bs / Math.max(b.game.price_discounted_f, 0.01);
-        return valB - valA;
-      });
-    }
+    // Tier 1: confident games (10+ reviews), sorted by metric
+    // Tier 2: games with some rating but few reviews, sorted by metric
+    // Tier 3: unrated games, sorted by price
+    const tier1 = scored.filter((s) => s.confident);
+    const tier2 = scored.filter((s) => !s.confident && s.bs >= 0);
+    const tier3 = scored.filter((s) => s.bs < 0);
 
-    return scored.map((s) => s.game);
+    const sortFn = sort === 'rating'
+      ? (a: typeof scored[0], b: typeof scored[0]) => b.bs - a.bs
+      : (a: typeof scored[0], b: typeof scored[0]) => b.val - a.val;
+
+    tier1.sort(sortFn);
+    tier2.sort(sortFn);
+    tier3.sort((a, b) => a.game.price_discounted_f - b.game.price_discounted_f);
+
+    return [...tier1, ...tier2, ...tier3].map((s) => s.game);
   }, [tabGames, sort, ratings, globalMean, isClientSort]);
 
   const displayGames = isClientSort && activeTab === 'deals'

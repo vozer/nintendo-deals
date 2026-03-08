@@ -3,13 +3,13 @@
 import { SortOption } from '@/lib/types';
 
 const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+  { value: 'value', label: 'Best Value ★/€' },
+  { value: 'rating', label: 'Top Rated ★' },
   { value: 'popularity', label: 'Popularity' },
   { value: 'discount', label: 'Discount %' },
   { value: 'price_asc', label: 'Price ↑' },
   { value: 'price_desc', label: 'Price ↓' },
   { value: 'title', label: 'Title A-Z' },
-  { value: 'rating', label: 'Rating ★' },
-  { value: 'value', label: 'Best Value' },
 ];
 
 interface SortSelectProps {
