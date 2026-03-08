@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.7.2] - 2026-03-08
+
+### Added
+
+- **SteamSpy tag-based erotic content filtering** — fetches community tags (up to 15) per game from SteamSpy API during steam-backfill
+- **`hasBlockedSteamTags()` filter** — blocks games tagged with Hentai, NSFW, Dating Sim, or Otome
+- **`--tags-only` mode** in steam-backfill.py for backfilling tags on already-matched entries
+
+### Changed
+
+- **Blocked tag list refined** — removed "Sexual Content" (too broad, false positives on horror games like Sagebrush, Despotism 3k). Kept Hentai, NSFW, Dating Sim, Otome
+- **Rate limit increased** — SteamSpy API calls now use 1s delay (was 0.5s) to avoid rate limiting
+
+### Stats
+
+- 1016 games with Steam data, 960 now have SteamSpy tags
+- 54 games blocked by erotic/dating tags (Sweetest Monster, Prison Princess, Fantasy Tavern Sextet series, etc.)
+
 ## [1.7.1] - 2026-03-08
 
 ### Fixed
