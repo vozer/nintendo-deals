@@ -25,8 +25,34 @@ export async function PUT(req: NextRequest) {
 
   try {
     const ratings = await req.json();
+    const count = Object.keys(ratings).length;
+
+    if (count === 0) {
+      return NextResponse.json(
+        { error: 'Refusing to save empty data — would wipe existing entries' },
+        { status: 400 },
+      );
+    }
+
+    const existing = await getSteamRatings();
+    const existingCount = Object.keys(existing).length;
+    if (existingCount > 100 && count < existingCount * 0.5) {
+      return NextResponse.json(
+        { error: `Refusing destructive write: would drop from ${existingCount} to ${count} entries. Use x-force-overwrite: true header to override.` },
+        { status: 400 },
+      );
+    }
+
+    const forceOverwrite = req.headers.get('x-force-overwrite') === 'true';
+    if (!forceOverwrite && existingCount > 100 && count < existingCount * 0.8) {
+      return NextResponse.json(
+        { warning: `Significant reduction: ${existingCount} → ${count}. Add x-force-overwrite: true to proceed.`, saved: 0 },
+        { status: 409 },
+      );
+    }
+
     await saveSteamRatings(ratings);
-    return NextResponse.json({ saved: Object.keys(ratings).length });
+    return NextResponse.json({ saved: count });
   } catch (error) {
     console.error('Failed to save steam ratings:', error);
     return NextResponse.json(

@@ -25,8 +25,17 @@ export async function PUT(req: NextRequest) {
 
   try {
     const map = await req.json();
+    const count = Object.keys(map).length;
+
+    if (count === 0) {
+      return NextResponse.json(
+        { error: 'Refusing to save empty data — would wipe existing entries' },
+        { status: 400 },
+      );
+    }
+
     await saveCuratedMap(map);
-    return NextResponse.json({ saved: Object.keys(map).length });
+    return NextResponse.json({ saved: count });
   } catch (error) {
     console.error('Failed to save curated map:', error);
     return NextResponse.json(

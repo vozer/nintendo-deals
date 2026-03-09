@@ -25,8 +25,26 @@ export async function PUT(req: NextRequest) {
 
   try {
     const ratings = await req.json();
+    const count = Object.keys(ratings).length;
+
+    if (count === 0) {
+      return NextResponse.json(
+        { error: 'Refusing to save empty data — would wipe existing entries' },
+        { status: 400 },
+      );
+    }
+
+    const existing = await getRatings();
+    const existingCount = Object.keys(existing).length;
+    if (existingCount > 100 && count < existingCount * 0.5) {
+      return NextResponse.json(
+        { error: `Refusing destructive write: would drop from ${existingCount} to ${count} entries. Use x-force-overwrite: true header to override.` },
+        { status: 400 },
+      );
+    }
+
     await saveRatings(ratings);
-    return NextResponse.json({ saved: Object.keys(ratings).length });
+    return NextResponse.json({ saved: count });
   } catch (error) {
     console.error('Failed to save ratings:', error);
     return NextResponse.json(

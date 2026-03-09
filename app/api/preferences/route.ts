@@ -19,6 +19,14 @@ export async function GET() {
 export async function PUT(req: NextRequest) {
   try {
     const prefs = await req.json();
+
+    if (!prefs || typeof prefs !== 'object' || !Array.isArray(prefs.hiddenGames)) {
+      return NextResponse.json(
+        { error: 'Invalid preferences format' },
+        { status: 400 },
+      );
+    }
+
     await savePreferences(prefs);
     return NextResponse.json(prefs);
   } catch (error) {

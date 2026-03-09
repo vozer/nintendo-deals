@@ -25,8 +25,26 @@ export async function PUT(req: NextRequest) {
 
   try {
     const media = await req.json();
+    const count = Object.keys(media).length;
+
+    if (count === 0) {
+      return NextResponse.json(
+        { error: 'Refusing to save empty data — would wipe existing entries' },
+        { status: 400 },
+      );
+    }
+
+    const existing = await getMedia();
+    const existingCount = Object.keys(existing).length;
+    if (existingCount > 100 && count < existingCount * 0.5) {
+      return NextResponse.json(
+        { error: `Refusing destructive write: would drop from ${existingCount} to ${count} entries. Use x-force-overwrite: true header to override.` },
+        { status: 400 },
+      );
+    }
+
     await saveMedia(media);
-    return NextResponse.json({ saved: Object.keys(media).length });
+    return NextResponse.json({ saved: count });
   } catch (error) {
     console.error('Failed to save media:', error);
     return NextResponse.json(
