@@ -9,13 +9,13 @@ Designed to run as daily cron on Raspberry Pi alongside n8n ratings workflow.
 """
 import json, time, re, urllib.request, urllib.parse, sys, os
 
-TWITCH_CLIENT_ID = "REDACTED_TWITCH_CLIENT_ID"
-TWITCH_CLIENT_SECRET = "REDACTED_TWITCH_CLIENT_SECRET"
+TWITCH_CLIENT_ID = os.environ.get('TWITCH_CLIENT_ID', '')
+TWITCH_CLIENT_SECRET = os.environ.get('TWITCH_CLIENT_SECRET', '')
 IGDB_SCREENSHOTS_URL = "https://api.igdb.com/v4/screenshots"
 IGDB_VIDEOS_URL = "https://api.igdb.com/v4/game_videos"
 NINTENDO_BASE = "https://www.nintendo.com"
 VERCEL_API = "https://nintendo-deals.vercel.app"
-API_KEY = "REDACTED_RATINGS_API_KEY"
+API_KEY = os.environ.get('RATINGS_API_KEY', '')
 SAVE_EVERY = 50
 BATCH_SIZE = 500
 

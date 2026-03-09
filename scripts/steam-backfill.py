@@ -7,7 +7,7 @@ import os
 import sys
 import unicodedata
 
-API_KEY = os.environ.get('RATINGS_API_KEY', 'REDACTED_RATINGS_API_KEY')
+API_KEY = os.environ.get('RATINGS_API_KEY', '')
 BASE_URL = "https://nintendo-deals.vercel.app"
 SAVE_EVERY = 20
 

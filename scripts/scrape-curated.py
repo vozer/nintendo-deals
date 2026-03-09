@@ -6,7 +6,7 @@ import os
 import unicodedata
 import time
 
-API_KEY = os.environ.get('RATINGS_API_KEY', 'REDACTED_RATINGS_API_KEY')
+API_KEY = os.environ.get('RATINGS_API_KEY', '')
 BASE_URL = "https://nintendo-deals.vercel.app"
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
