@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.7.3] - 2026-03-09
+
+### Added
+
+- **Composite shovelware filter** — scores games on Steam votes/score, publisher quality, tag ratio, price, and Nintendo categories. Games scoring ≥6 moved to "Low Quality" tab (164 games)
+- **Steam tag filter UI** — collapsible panel with 60 most common Steam tags, click to exclude from Deals
+- **Improved Steam matching** — suffix stripping (Legacy, XL, DX, Complete Edition, etc.), multi-pass search, Reviews API fallback. Match rate 40% → 55% (1016 → 1389 games)
+
+### Changed
+
+- **Erotic content tag filter refined** — removed "Sexual Content" (false positives on horror games), kept Hentai/NSFW/Dating Sim/Otome (54 → 60+ games filtered)
+
 ## [1.7.2] - 2026-03-08
 
 ### Added
