@@ -20,40 +20,73 @@ def normalize(value):
     return re.sub(r'\s+', ' ', value).strip()
 
 
-def search_steam(title):
-    safe = urllib.parse.quote(title, safe='')
+SWITCH_SUFFIXES_RE = re.compile(
+    r'\s*[-:]\s*(Legacy|XL|DX|Deluxe|Definitive|Complete|Enhanced|'
+    r'Final|Anniversary|Ultimate|Remastered|Special|Gold|Premium|'
+    r'Platinum|Extended|for Nintendo Switch|Nintendo Switch Edition|'
+    r'Switch Edition)\s*(Edition|Version|Cut)?\s*$',
+    re.IGNORECASE,
+)
+
+def _steam_search(query):
+    safe = urllib.parse.quote(query, safe='')
     url = f"https://store.steampowered.com/api/storesearch?term={safe}&cc=us&l=en"
     req = urllib.request.Request(url, headers={
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
     })
     try:
         with urllib.request.urlopen(req, timeout=10) as res:
-            data = json.loads(res.read())
-            items = data.get('items', [])
-            if not items:
-                return None
-
-            norm_title = normalize(title)
-
-            for item in items[:5]:
-                norm_name = normalize(item['name'])
-                if norm_name == norm_title:
-                    return item['id']
-
-            for item in items[:5]:
-                norm_name = normalize(item['name'])
-                if norm_title in norm_name or norm_name in norm_title:
-                    return item['id']
-
-            base_title = re.split(r'\s*[:\-\u2013\u2014]\s*', norm_title)[0].strip()
-            if len(base_title) >= 6:
-                for item in items[:3]:
-                    norm_name = normalize(item['name'])
-                    if base_title in norm_name:
-                        return item['id']
-
+            return json.loads(res.read()).get('items', [])
     except Exception:
-        pass
+        return []
+
+
+def _match_items(items, norm_title):
+    for item in items[:5]:
+        if normalize(item['name']) == norm_title:
+            return item['id']
+    for item in items[:5]:
+        nn = normalize(item['name'])
+        if norm_title in nn or nn in norm_title:
+            return item['id']
+    base = re.split(r'\s*[:\-\u2013\u2014]\s*', norm_title)[0].strip()
+    if len(base) >= 6:
+        for item in items[:3]:
+            if base in normalize(item['name']):
+                return item['id']
+    return None
+
+
+def search_steam(title):
+    norm_title = normalize(title)
+    items = _steam_search(title)
+    if items:
+        appid = _match_items(items, norm_title)
+        if appid:
+            return appid
+
+    stripped = SWITCH_SUFFIXES_RE.sub('', title).strip()
+    if stripped != title and len(stripped) >= 4:
+        norm_stripped = normalize(stripped)
+        items2 = _steam_search(stripped)
+        if items2:
+            appid = _match_items(items2, norm_stripped)
+            if appid:
+                return appid
+            appid = _match_items(items2, norm_title)
+            if appid:
+                return appid
+
+    parts = re.split(r'\s*[:\-\u2013\u2014]\s*', title)
+    if len(parts) >= 2:
+        base = parts[0].strip()
+        if len(base) >= 4 and base != stripped:
+            items3 = _steam_search(base)
+            if items3:
+                appid = _match_items(items3, normalize(base))
+                if appid:
+                    return appid
+
     return None
 
 
@@ -89,6 +122,20 @@ def get_steam_review_stats(appid):
                     return pct, count
     except Exception:
         pass
+
+    try:
+        api_url = f"https://store.steampowered.com/appreviews/{appid}?json=1&language=all&purchase_type=all"
+        req2 = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req2, timeout=10) as res2:
+            data = json.loads(res2.read())
+            s = data.get('query_summary', {})
+            total = s.get('total_positive', 0) + s.get('total_negative', 0)
+            if total > 0:
+                pct = int(s['total_positive'] / total * 100)
+                return pct, total
+    except Exception:
+        pass
+
     return None, None
 
 
@@ -105,7 +152,7 @@ def backfill_tags():
         print("No existing ratings found.")
         return
 
-    needs_tags = [k for k, v in existing.items() if 'tags' not in v]
+    needs_tags = [k for k, v in existing.items() if not v.get('tags')]
     print(f"Entries needing tags: {len(needs_tags)}")
 
     save_counter = 0
