@@ -2,14 +2,23 @@ import { NintendoGame, GamesResponse, SortOption } from './types';
 
 const NINTENDO_SOLR_URL = 'https://searching.nintendo-europe.com/es/select';
 
-const BASE_FILTER = [
+const DEALS_FILTER = [
   'type:GAME',
   'system_type:nintendoswitch*',
   'price_has_discount_b:true',
   'price_sorting_f:[0 TO 14.99]',
   'language_availability:*english*',
-  'digital_version_b:true',
 ].join(' AND ');
+
+const SEARCH_FILTER = [
+  'type:GAME',
+  'system_type:nintendoswitch*',
+  'language_availability:*english*',
+].join(' AND ');
+
+function escapeSolr(query: string): string {
+  return query.replace(/([+\-&|!(){}[\]^"~*?:\\/])/g, '\\$1');
+}
 
 const SORT_MAP: Record<SortOption, string> = {
   discount: 'price_discount_percentage_f desc',
@@ -32,17 +41,19 @@ export async function fetchDeals(options: {
 }): Promise<GamesResponse> {
   const { sort = 'popularity', search, start = 0, rows = 48, tab } = options;
 
-  const q = search ? search.trim() : '*';
+  const isSearch = !!search?.trim();
 
-  let fq = BASE_FILTER;
+  if (isSearch) {
+    return fetchSearchResults(search!.trim(), rows);
+  }
+
+  let fq = DEALS_FILTER;
 
   if (tab === 'sports') {
     fq += ' AND pretty_game_categories_txt:Deportes';
-  } else if (tab === 'collections') {
-    // No server-side filter — handled by search query for title words
   }
 
-  const baseQ = tab === 'collections' && !search ? '(collection OR bundle OR "in 1" OR "mega pack")' : q;
+  const baseQ = tab === 'collections' ? '(collection OR bundle OR "in 1" OR "mega pack")' : '*';
   const sortStr = SORT_MAP[sort] || SORT_MAP.popularity;
 
   if (rows <= SOLR_MAX_ROWS) {
@@ -56,7 +67,6 @@ export async function fetchDeals(options: {
     return { games: data.response.docs as NintendoGame[], total: data.response.numFound as number };
   }
 
-  // Paginate through Solr's 1000-row cap
   const allGames: NintendoGame[] = [];
   let total = 0;
   let offset = start;
@@ -78,4 +88,24 @@ export async function fetchDeals(options: {
   }
 
   return { games: allGames, total };
+}
+
+async function fetchSearchResults(query: string, maxRows: number): Promise<GamesResponse> {
+  const escaped = escapeSolr(query);
+  const rows = Math.min(maxRows, 100);
+
+  const params = new URLSearchParams({
+    defType: 'edismax',
+    q: escaped,
+    qf: 'title^3 title_extras_txt^2 title_master_s^3',
+    pf: 'title^10 title_extras_txt^5 title_master_s^10',
+    fq: SEARCH_FILTER,
+    rows: String(rows),
+    wt: 'json',
+  });
+
+  const res = await fetch(`${NINTENDO_SOLR_URL}?${params}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Nintendo API error: ${res.status}`);
+  const data = await res.json();
+  return { games: data.response.docs as NintendoGame[], total: data.response.numFound as number };
 }

@@ -67,6 +67,7 @@ function ratingBg(score: number): string {
 }
 
 export default function GameCard({ game, preferences, rating, steam, media, isCurated, globalMean, onHide, onWatch, hideLabel = 'Hide', onUnwatch, onOpenDetail, onThink }: GameCardProps) {
+  const isOnSale = game.price_has_discount_b !== false;
   const watchEntry = preferences.watchGames[game.fs_id];
   
   // Calculate display score (blended if steam available)
@@ -90,7 +91,7 @@ export default function GameCard({ game, preferences, rating, steam, media, isCu
   const watchThresholds: (2 | 5 | 10)[] = [2, 5, 10];
 
   return (
-    <div className="bg-white rounded-2xl overflow-hidden flex flex-col">
+    <div className={`rounded-2xl overflow-hidden flex flex-col ${isOnSale ? 'bg-white' : 'bg-gray-50'}`}>
       <div
         className={`relative w-full aspect-video bg-gray-200 ${onOpenDetail || (media && media.screenshots.length > 0) ? 'cursor-pointer group' : ''}`}
         onClick={() => onOpenDetail?.(game)}
@@ -99,13 +100,19 @@ export default function GameCard({ game, preferences, rating, steam, media, isCu
           <img
             src={imageUrl}
             alt={game.title}
-            className="w-full h-full object-cover group-hover:brightness-90 transition-all"
+            className={`w-full h-full object-cover group-hover:brightness-90 transition-all ${isOnSale ? '' : 'grayscale-[30%] opacity-80'}`}
             loading="lazy"
           />
         )}
-        <div className="absolute top-2 right-2 bg-[#E60012] text-white text-xs font-bold px-2 py-1 rounded-lg">
-          -{Math.round(game.price_discount_percentage_f)}%
-        </div>
+        {isOnSale ? (
+          <div className="absolute top-2 right-2 bg-[#E60012] text-white text-xs font-bold px-2 py-1 rounded-lg">
+            -{Math.round(game.price_discount_percentage_f)}%
+          </div>
+        ) : (
+          <div className="absolute top-2 right-2 bg-gray-500 text-white text-xs font-bold px-2 py-1 rounded-lg">
+            Not on sale
+          </div>
+        )}
         {isCurated && (
           <div className="absolute top-2 left-2 bg-yellow-400 text-yellow-900 text-xs font-bold px-2 py-1 rounded-lg flex items-center gap-1 shadow-sm z-10">
             <span>🏆 Curated</span>
@@ -206,12 +213,23 @@ export default function GameCard({ game, preferences, rating, steam, media, isCu
         )}
 
         <div className="flex items-baseline gap-2 mt-auto">
-          <span className="text-sm text-gray-400 line-through">
-            {game.price_regular_f.toFixed(2)} €
-          </span>
-          <span className="text-xl font-extrabold text-[#E60012]">
-            {game.price_discounted_f.toFixed(2)} €
-          </span>
+          {isOnSale ? (
+            <>
+              <span className="text-sm text-gray-400 line-through">
+                {game.price_regular_f.toFixed(2)} €
+              </span>
+              <span className="text-xl font-extrabold text-[#E60012]">
+                {game.price_discounted_f.toFixed(2)} €
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="text-xl font-extrabold text-gray-600">
+                {(game.price_sorting_f ?? game.price_regular_f ?? 0).toFixed(2)} €
+              </span>
+              <span className="text-xs text-gray-400">full price</span>
+            </>
+          )}
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">

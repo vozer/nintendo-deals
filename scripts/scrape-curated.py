@@ -132,6 +132,7 @@ def main():
                         'title': entry['title'],
                         'review': entry['review'][:500],
                         'source_url': source_url,
+                        'source': 'nintendolife',
                         'rank': entry['rank'],
                     }
                 print(f"  [{entry['rank']}] {entry['title']} -> fs_id={fs_id}")

@@ -18,7 +18,7 @@ export default function SearchBar({ value, onChange }: SearchBarProps) {
   function handleChange(newValue: string) {
     setLocalValue(newValue);
     clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => onChange(newValue), 300);
+    timerRef.current = setTimeout(() => onChange(newValue), 500);
   }
 
   return (

@@ -198,23 +198,53 @@ export default function GameDetailModal({ game, rating, media, curatedEntry, onC
           )}
 
           {curatedEntry && (
-            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-bold text-yellow-800">NintendoLife Review</span>
+            <div className={`border rounded-xl p-4 space-y-2 ${
+              curatedEntry.source === 'ntdeals'
+                ? 'bg-blue-50 border-blue-200'
+                : 'bg-yellow-50 border-yellow-200'
+            }`}>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`text-sm font-bold ${
+                  curatedEntry.source === 'ntdeals' ? 'text-blue-800' : 'text-yellow-800'
+                }`}>
+                  {curatedEntry.source === 'ntdeals' ? 'NT Deals' : 'NintendoLife Review'}
+                </span>
                 {curatedEntry.rank && (
-                  <span className="text-xs font-semibold bg-yellow-200 text-yellow-800 px-1.5 py-0.5 rounded">
+                  <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${
+                    curatedEntry.source === 'ntdeals'
+                      ? 'bg-blue-200 text-blue-800'
+                      : 'bg-yellow-200 text-yellow-800'
+                  }`}>
                     #{curatedEntry.rank}
                   </span>
                 )}
+                {curatedEntry.metacritic_score != null && (
+                  <span className="text-xs font-semibold bg-green-200 text-green-800 px-1.5 py-0.5 rounded">
+                    Metacritic {curatedEntry.metacritic_score}
+                  </span>
+                )}
+                {curatedEntry.deal_rating && (
+                  <span className="text-xs font-semibold bg-purple-200 text-purple-800 px-1.5 py-0.5 rounded">
+                    {curatedEntry.deal_rating}
+                  </span>
+                )}
               </div>
-              <p className="text-sm text-yellow-900 leading-relaxed italic">&ldquo;{curatedEntry.review}&rdquo;</p>
+              {curatedEntry.review && (
+                <p className={`text-sm leading-relaxed italic ${
+                  curatedEntry.source === 'ntdeals' ? 'text-blue-900' : 'text-yellow-900'
+                }`}>&ldquo;{curatedEntry.review}&rdquo;</p>
+              )}
               <a
                 href={curatedEntry.source_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-xs font-medium text-yellow-700 hover:text-yellow-900 transition-colors"
+                className={`inline-flex items-center gap-1 text-xs font-medium transition-colors ${
+                  curatedEntry.source === 'ntdeals'
+                    ? 'text-blue-700 hover:text-blue-900'
+                    : 'text-yellow-700 hover:text-yellow-900'
+                }`}
               >
-                Read full review on NintendoLife
+                {curatedEntry.source === 'ntdeals' ? 'View on NT Deals' : 'Read full review on NintendoLife'}
                 <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
               </a>
             </div>

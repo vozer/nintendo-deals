@@ -39,7 +39,8 @@ export default function DealsClient() {
   const [showTagFilter, setShowTagFilter] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
-  const isClientSort = sort === 'rating' || sort === 'value';
+  const isSearch = search.trim().length > 0;
+  const isClientSort = (sort === 'rating' || sort === 'value') && !isSearch;
 
   const fetchMainGames = useCallback(async (start = 0, append = false) => {
     if (!append) setLoading(true);
@@ -47,7 +48,7 @@ export default function DealsClient() {
 
     try {
       const serverSort = isClientSort ? 'popularity' : sort;
-      const rows = isClientSort && !append ? '3000' : '48';
+      const rows = isSearch ? '100' : (isClientSort && !append ? '3000' : '48');
       const params = new URLSearchParams({ sort: serverSort, rows, start: String(start) });
       if (search) params.set('search', search);
       const res = await fetch(`/api/games?${params}`);
@@ -67,7 +68,7 @@ export default function DealsClient() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [sort, search, isClientSort]);
+  }, [sort, search, isClientSort, isSearch]);
 
   const fetchCollections = useCallback(async (start = 0, append = false) => {
     try {
@@ -315,6 +316,10 @@ export default function DealsClient() {
   }
 
   const dealsGames = useMemo(() => {
+    if (isSearch) {
+      return allGames.filter((game) => !preferences.hiddenGames.includes(game.fs_id));
+    }
+
     return allGames.filter((game) => {
       const cls = classifyGame(game);
       if (cls !== 'deals') return false;
@@ -339,7 +344,7 @@ export default function DealsClient() {
       return true;
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allGames, preferences, ratings, steamRatings, curatedMap, excludedTags]);
+  }, [allGames, preferences, ratings, steamRatings, curatedMap, excludedTags, isSearch]);
 
   const lowConfidenceGames = useMemo(() => {
     return allGames.filter((game) => {
@@ -416,6 +421,7 @@ export default function DealsClient() {
   const globalMean = useMemo(() => computeGlobalMean(ratings), [ratings]);
 
   const sortedGames = useMemo((): NintendoGame[] => {
+    if (isSearch) return tabGames;
     if (!isClientSort) return tabGames;
 
     const curated = tabGames.filter(g => g.fs_id in curatedMap);
@@ -462,14 +468,14 @@ export default function DealsClient() {
 
     const sortedNonCurated = [...tier1, ...tier2, ...tier3].map((s) => s.game);
     return [...curated, ...sortedNonCurated];
-  }, [tabGames, sort, ratings, steamRatings, globalMean, isClientSort, curatedMap]);
+  }, [tabGames, sort, ratings, steamRatings, globalMean, isClientSort, curatedMap, isSearch]);
 
-  const clientSortedTab = isClientSort && (activeTab === 'deals' || activeTab === 'low_confidence' || activeTab === 'shovelware');
+  const clientSortedTab = isClientSort && !isSearch && (activeTab === 'deals' || activeTab === 'low_confidence' || activeTab === 'shovelware');
   const displayGames = clientSortedTab
     ? sortedGames.slice(0, visibleCount)
     : sortedGames;
 
-  const canLoadMore =
+  const canLoadMore = !isSearch &&
     (activeTab === 'deals' || activeTab === 'collections' || activeTab === 'sports' || activeTab === 'low_confidence' || activeTab === 'shovelware') &&
     (() => {
       if (clientSortedTab) return visibleCount < sortedGames.length;
@@ -495,7 +501,9 @@ export default function DealsClient() {
         <h1 className="text-white font-bold text-lg sm:text-xl tracking-tight">Nintendo Deals</h1>
         <div className="flex items-center gap-3">
           <span className="bg-white/15 text-white text-xs font-semibold px-3 py-1 rounded-full">
-            {dealsGames.length.toLocaleString()} deals
+            {isSearch
+              ? `${dealsGames.length} results`
+              : `${dealsGames.length.toLocaleString()} deals`}
           </span>
           <button onClick={handleLogout} className="text-white/70 hover:text-white transition-colors" title="Logout">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
@@ -552,33 +560,41 @@ export default function DealsClient() {
         </div>
       )}
 
-      <div className="bg-white px-4 sm:px-8 border-b border-gray-100 overflow-x-auto">
-        <div className="flex gap-1 min-w-max">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-2.5 text-sm font-medium transition-colors relative whitespace-nowrap ${
-                activeTab === tab.id
-                  ? 'text-[#E60012]'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {tab.label}
-              {tab.count !== undefined && tab.count > 0 && (
-                <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded-full ${
-                  activeTab === tab.id ? 'bg-red-100 text-[#E60012]' : 'bg-gray-100 text-gray-500'
-                }`}>
-                  {tab.count}
-                </span>
-              )}
-              {activeTab === tab.id && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#E60012]" />
-              )}
-            </button>
-          ))}
+      {isSearch ? (
+        <div className="bg-white px-4 sm:px-8 py-2 border-b border-gray-100">
+          <p className="text-sm text-gray-500">
+            Searching all Nintendo Switch games{allTotal > 0 ? ` — ${allTotal.toLocaleString()} found` : ''}
+          </p>
         </div>
-      </div>
+      ) : (
+        <div className="bg-white px-4 sm:px-8 border-b border-gray-100 overflow-x-auto">
+          <div className="flex gap-1 min-w-max">
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-4 py-2.5 text-sm font-medium transition-colors relative whitespace-nowrap ${
+                  activeTab === tab.id
+                    ? 'text-[#E60012]'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {tab.label}
+                {tab.count !== undefined && tab.count > 0 && (
+                  <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded-full ${
+                    activeTab === tab.id ? 'bg-red-100 text-[#E60012]' : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    {tab.count}
+                  </span>
+                )}
+                {activeTab === tab.id && (
+                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#E60012]" />
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <main className="flex-1 px-4 sm:px-8 py-6">
         {loading && activeTab === 'deals' ? (

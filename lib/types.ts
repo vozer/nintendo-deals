@@ -7,6 +7,8 @@ export interface NintendoGame {
   price_regular_f: number;
   price_discounted_f: number;
   price_discount_percentage_f: number;
+  price_has_discount_b?: boolean;
+  price_sorting_f?: number;
   excerpt: string;
   url: string;
   pretty_game_categories_txt: string[];
@@ -89,7 +91,12 @@ export interface CuratedEntry {
   title: string;
   review: string;
   source_url: string;
+  source?: 'nintendolife' | 'ntdeals';
   rank?: number;
+  metacritic_score?: number;
+  deal_rating?: string;
+  discount_pct?: number;
+  days_remaining?: number;
 }
 
 export type CuratedMap = Record<string, CuratedEntry>;
