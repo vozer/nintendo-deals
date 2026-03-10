@@ -449,7 +449,7 @@ export default function DealsClient() {
       const totalVotes = rc + (s?.votes ?? 0);
       const confident = totalVotes >= CONFIDENT_THRESHOLD && bs >= 0;
 
-      const priceScore = (1 - game.price_discounted_f / maxPrice) * 100;
+      const priceScore = (1 - (game.price_discounted_f ?? game.price_sorting_f ?? 0) / maxPrice) * 100;
       const val = bs >= 0 ? bs * 0.7 + priceScore * 0.3 : -1;
       return { game, bs, confident, val };
     });
@@ -464,7 +464,7 @@ export default function DealsClient() {
 
     tier1.sort(sortFn);
     tier2.sort(sortFn);
-    tier3.sort((a, b) => a.game.price_discounted_f - b.game.price_discounted_f);
+    tier3.sort((a, b) => (a.game.price_discounted_f ?? 999) - (b.game.price_discounted_f ?? 999));
 
     const sortedNonCurated = [...tier1, ...tier2, ...tier3].map((s) => s.game);
     return [...curated, ...sortedNonCurated];

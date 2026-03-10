@@ -161,15 +161,32 @@ export default function GameDetailModal({ game, rating, media, curatedEntry, onC
               <p className="text-sm text-gray-500 mt-0.5">{game.publisher}</p>
             </div>
             <div className="text-right shrink-0">
-              <div className="text-sm text-gray-400 line-through">
-                {game.price_regular_f.toFixed(2)} €
-              </div>
-              <div className="text-2xl font-extrabold text-[#E60012]">
-                {game.price_discounted_f.toFixed(2)} €
-              </div>
-              <div className="text-xs font-bold text-[#E60012]">
-                -{Math.round(game.price_discount_percentage_f)}%
-              </div>
+              {game.price_has_discount_b !== false && game.price_discounted_f != null ? (
+                <>
+                  {game.price_regular_f != null && (
+                    <div className="text-sm text-gray-400 line-through">
+                      {game.price_regular_f.toFixed(2)} €
+                    </div>
+                  )}
+                  <div className="text-2xl font-extrabold text-[#E60012]">
+                    {game.price_discounted_f.toFixed(2)} €
+                  </div>
+                  {game.price_discount_percentage_f != null && (
+                    <div className="text-xs font-bold text-[#E60012]">
+                      -{Math.round(game.price_discount_percentage_f)}%
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="text-2xl font-extrabold text-gray-600">
+                    {(game.price_sorting_f ?? game.price_regular_f ?? 0).toFixed(2)} €
+                  </div>
+                  <div className="text-xs font-medium text-gray-400">
+                    Not on sale
+                  </div>
+                </>
+              )}
             </div>
           </div>
 

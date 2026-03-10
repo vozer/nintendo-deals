@@ -104,15 +104,15 @@ export default function GameCard({ game, preferences, rating, steam, media, isCu
             loading="lazy"
           />
         )}
-        {isOnSale ? (
+        {isOnSale && game.price_discount_percentage_f ? (
           <div className="absolute top-2 right-2 bg-[#E60012] text-white text-xs font-bold px-2 py-1 rounded-lg">
             -{Math.round(game.price_discount_percentage_f)}%
           </div>
-        ) : (
+        ) : !isOnSale ? (
           <div className="absolute top-2 right-2 bg-gray-500 text-white text-xs font-bold px-2 py-1 rounded-lg">
             Not on sale
           </div>
-        )}
+        ) : null}
         {isCurated && (
           <div className="absolute top-2 left-2 bg-yellow-400 text-yellow-900 text-xs font-bold px-2 py-1 rounded-lg flex items-center gap-1 shadow-sm z-10">
             <span>🏆 Curated</span>
@@ -213,11 +213,13 @@ export default function GameCard({ game, preferences, rating, steam, media, isCu
         )}
 
         <div className="flex items-baseline gap-2 mt-auto">
-          {isOnSale ? (
+          {isOnSale && game.price_discounted_f != null ? (
             <>
-              <span className="text-sm text-gray-400 line-through">
-                {game.price_regular_f.toFixed(2)} €
-              </span>
+              {game.price_regular_f != null && (
+                <span className="text-sm text-gray-400 line-through">
+                  {game.price_regular_f.toFixed(2)} €
+                </span>
+              )}
               <span className="text-xl font-extrabold text-[#E60012]">
                 {game.price_discounted_f.toFixed(2)} €
               </span>
