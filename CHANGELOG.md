@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.8.0] - 2026-03-10
+
+### Added
+
+- **Search overhaul** — search now queries ALL Nintendo Switch games (not just discounted) using Solr eDisMax with multilingual phrase boost across `title`, `title_extras_txt`, and `title_master_s`
+- **"Not on sale" state** — games found via search that aren't discounted show with gray badge, muted styling, and full price with "Watch for price drop" CTA
+- **ntdeals.net scraper** (`scripts/scrape-ntdeals.py`) — new curated source using cloudscraper for Cloudflare bypass, extracts Metacritic scores and deal ratings across 3 sort modes
+- **Multi-source curated display** — curated entries now show source attribution (NintendoLife vs NT Deals) with distinct color schemes and Metacritic score badges
+- **CuratedEntry extended** — new optional fields: `source`, `metacritic_score`, `deal_rating`, `discount_pct`, `days_remaining`
+
+### Fixed
+
+- **177 missing games restored** — removed `digital_version_b:true` filter from Solr query; games like Ori and the Blind Forest, Sifu, Danganronpa, Core Keeper now appear correctly
+- **Search crash on non-sale games** — added null checks for `price_discounted_f`, `price_discount_percentage_f`, and `price_regular_f` in GameCard, GameDetailModal, and sort functions
+- **Search relevancy** — switched from raw Solr `q` to eDisMax with phrase boost; "Hollow Knight" now returns Hollow Knight as top result instead of "Hollow Cocoon"
+
+### Changed
+
+- **Search debounce** — increased from 300ms to 500ms for broader search queries
+- **Search UX** — tabs hidden during search, "Searching all Nintendo Switch games" banner shown, result count in header
+
 ## [1.7.3] - 2026-03-09
 
 ### Added
