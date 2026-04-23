@@ -10,10 +10,26 @@ import SearchBar from './SearchBar';
 import SortSelect from './SortSelect';
 
 type ViewTab = 'deals' | 'collections' | 'sports' | 'thinking' | 'hidden' | 'watched' | 'low_confidence' | 'shovelware';
+type CurationKind = 'nintendolife' | 'ntdeals' | null;
 
 const DEFAULT_PREFS: Preferences = { hiddenGames: [], watchGames: {}, thinkingAbout: [] };
 
-export default function DealsClient() {
+interface DealsClientProps {
+  initialGameId?: string;
+}
+
+type PreferenceActionRequest =
+  | { action: 'hide' | 'unhide' | 'unwatch' | 'toggle_thinking'; fs_id: string }
+  | { action: 'watch'; fs_id: string; threshold: 2 | 5 | 10; title?: string };
+
+type PreferenceActionGameState = {
+  fs_id: string;
+  hidden: boolean;
+  watch: { threshold: 2 | 5 | 10; title: string } | null;
+  thinking?: boolean;
+};
+
+export default function DealsClient({ initialGameId }: DealsClientProps) {
   const [allGames, setAllGames] = useState<NintendoGame[]>([]);
   const [allTotal, setAllTotal] = useState(0);
   const [collectionGames, setCollectionGames] = useState<NintendoGame[]>([]);
@@ -38,6 +54,9 @@ export default function DealsClient() {
   const [excludedTags, setExcludedTags] = useState<Set<string>>(new Set());
   const [showTagFilter, setShowTagFilter] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const deepLinkHandledRef = useRef(false);
+  const deepLinkLookupStartedRef = useRef(false);
+  const preferenceActionQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const isSearch = search.trim().length > 0;
   const isClientSort = (sort === 'rating' || sort === 'value') && !isSearch;
@@ -190,6 +209,43 @@ export default function DealsClient() {
 
   useEffect(() => { setVisibleCount(48); }, [sort, activeTab, search]);
 
+  useEffect(() => {
+    if (!initialGameId || deepLinkHandledRef.current) return;
+    if (detailGame) {
+      deepLinkHandledRef.current = true;
+      return;
+    }
+
+    const deepLinkGame =
+      allGames.find((g) => g.fs_id === initialGameId) ||
+      collectionGames.find((g) => g.fs_id === initialGameId) ||
+      sportsGames.find((g) => g.fs_id === initialGameId);
+
+    if (deepLinkGame) {
+      setDetailGame(deepLinkGame);
+      deepLinkHandledRef.current = true;
+      return;
+    }
+
+    if (loading || deepLinkLookupStartedRef.current) return;
+
+    deepLinkLookupStartedRef.current = true;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/game?fs_id=${encodeURIComponent(initialGameId)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data?.game?.fs_id) {
+          setDetailGame(data.game as NintendoGame);
+        }
+      } catch {
+        // Ignore deep-link lookup failures.
+      } finally {
+        deepLinkHandledRef.current = true;
+      }
+    })();
+  }, [initialGameId, detailGame, allGames, collectionGames, sportsGames, loading]);
+
   // Infinite scroll
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -229,58 +285,116 @@ export default function DealsClient() {
     fetchMainGames, fetchCollections, fetchSports,
   ]);
 
-  function persistPrefs(prefs: Preferences) {
-    fetch('/api/preferences', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(prefs),
-    }).catch(() => {});
+  function applyActionResult(prev: Preferences, game: PreferenceActionGameState): Preferences {
+    const hiddenGames = game.hidden
+      ? (prev.hiddenGames.includes(game.fs_id) ? prev.hiddenGames : [...prev.hiddenGames, game.fs_id])
+      : prev.hiddenGames.filter((id) => id !== game.fs_id);
+
+    const watchGames = { ...prev.watchGames };
+    if (game.watch) watchGames[game.fs_id] = game.watch;
+    else delete watchGames[game.fs_id];
+
+    let thinkingAbout = prev.thinkingAbout;
+    if (typeof game.thinking === 'boolean') {
+      thinkingAbout = game.thinking
+        ? (prev.thinkingAbout.includes(game.fs_id) ? prev.thinkingAbout : [...prev.thinkingAbout, game.fs_id])
+        : prev.thinkingAbout.filter((id) => id !== game.fs_id);
+    }
+
+    return {
+      ...prev,
+      hiddenGames,
+      watchGames,
+      thinkingAbout,
+    };
   }
 
-  function updatePrefs(updater: (prev: Preferences) => Preferences) {
-    setPreferences((prev) => {
-      const next = updater(prev);
-      persistPrefs(next);
-      return next;
-    });
+  function sendPreferenceAction(
+    payload: PreferenceActionRequest,
+    optimisticUpdater?: (prev: Preferences) => Preferences,
+  ) {
+    if (optimisticUpdater) {
+      setPreferences((prev) => optimisticUpdater(prev));
+    }
+
+    const runAction = async () => {
+      try {
+        const res = await fetch('/api/preferences/actions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error('Failed to apply preference action');
+
+        const data = await res.json();
+        const game = data?.game as PreferenceActionGameState | undefined;
+        if (!game?.fs_id) {
+          await fetchPreferences();
+          return;
+        }
+
+        setPreferences((prev) => applyActionResult(prev, game));
+      } catch {
+        await fetchPreferences();
+      }
+    };
+
+    preferenceActionQueueRef.current = preferenceActionQueueRef.current
+      .catch(() => undefined)
+      .then(runAction);
   }
 
   function handleHide(gameId: string) {
-    updatePrefs((prev) => ({
-      ...prev,
-      hiddenGames: prev.hiddenGames.includes(gameId) ? prev.hiddenGames : [...prev.hiddenGames, gameId],
-    }));
+    void sendPreferenceAction(
+      { action: 'hide', fs_id: gameId },
+      (prev) => ({
+        ...prev,
+        hiddenGames: prev.hiddenGames.includes(gameId) ? prev.hiddenGames : [...prev.hiddenGames, gameId],
+      }),
+    );
   }
 
   function handleUnhide(gameId: string) {
-    updatePrefs((prev) => ({
-      ...prev,
-      hiddenGames: prev.hiddenGames.filter((id) => id !== gameId),
-    }));
+    void sendPreferenceAction(
+      { action: 'unhide', fs_id: gameId },
+      (prev) => ({
+        ...prev,
+        hiddenGames: prev.hiddenGames.filter((id) => id !== gameId),
+      }),
+    );
   }
 
   function handleWatch(gameId: string, threshold: 2 | 5 | 10, title: string) {
-    updatePrefs((prev) => ({
-      ...prev,
-      watchGames: { ...prev.watchGames, [gameId]: { threshold, title } },
-    }));
+    void sendPreferenceAction(
+      { action: 'watch', fs_id: gameId, threshold, title },
+      (prev) => ({
+        ...prev,
+        watchGames: { ...prev.watchGames, [gameId]: { threshold, title } },
+      }),
+    );
   }
 
   function handleUnwatch(gameId: string) {
-    updatePrefs((prev) => {
-      const next = { ...prev, watchGames: { ...prev.watchGames } };
-      delete next.watchGames[gameId];
-      return next;
-    });
+    void sendPreferenceAction(
+      { action: 'unwatch', fs_id: gameId },
+      (prev) => {
+        const next = { ...prev, watchGames: { ...prev.watchGames } };
+        delete next.watchGames[gameId];
+        return next;
+      },
+    );
   }
 
   function handleThink(gameId: string) {
-    updatePrefs((prev) => ({
-      ...prev,
-      thinkingAbout: prev.thinkingAbout.includes(gameId)
-        ? prev.thinkingAbout.filter((id) => id !== gameId)
-        : [...prev.thinkingAbout, gameId],
-    }));
+    void sendPreferenceAction(
+      { action: 'toggle_thinking', fs_id: gameId },
+      (prev) => ({
+        ...prev,
+        thinkingAbout: prev.thinkingAbout.includes(gameId)
+          ? prev.thinkingAbout.filter((id) => id !== gameId)
+          : [...prev.thinkingAbout, gameId],
+      }),
+    );
   }
 
   async function handleLogout() {
@@ -315,6 +429,21 @@ export default function DealsClient() {
     return tags.some(t => excludedTags.has(t));
   }
 
+  function getCurationKind(fsId: string): CurationKind {
+    const source = curatedMap[fsId]?.source;
+    if (source === 'nintendolife') return 'nintendolife';
+    if (source === 'ntdeals') return 'ntdeals';
+    return null;
+  }
+
+  function isNintendoLifeCurated(fsId: string): boolean {
+    return getCurationKind(fsId) === 'nintendolife';
+  }
+
+  function isNtDealsPick(fsId: string): boolean {
+    return getCurationKind(fsId) === 'ntdeals';
+  }
+
   const dealsGames = useMemo(() => {
     if (isSearch) {
       return allGames.filter((game) => !preferences.hiddenGames.includes(game.fs_id));
@@ -334,8 +463,7 @@ export default function DealsClient() {
 
       if (computeShovelwareScore(game, s, ratings[game.fs_id]) >= SHOVELWARE_THRESHOLD) return false;
 
-      const isCurated = game.fs_id in curatedMap;
-      if (isCurated) return true;
+      if (isNintendoLifeCurated(game.fs_id)) return true;
 
       const r = ratings[game.fs_id];
       const totalVotes = (r?.rating_count ?? 0) + (s?.votes ?? 0);
@@ -357,7 +485,7 @@ export default function DealsClient() {
       if (hasBlockedSteamTags(s?.tags)) return false;
       if (hasExcludedTag(s?.tags)) return false;
 
-      if (game.fs_id in curatedMap) return false;
+      if (isNintendoLifeCurated(game.fs_id)) return false;
 
       if (computeShovelwareScore(game, s, ratings[game.fs_id]) >= SHOVELWARE_THRESHOLD) return false;
 
@@ -424,8 +552,8 @@ export default function DealsClient() {
     if (isSearch) return tabGames;
     if (!isClientSort) return tabGames;
 
-    const curated = tabGames.filter(g => g.fs_id in curatedMap);
-    const nonCurated = tabGames.filter(g => !(g.fs_id in curatedMap));
+    const curated = tabGames.filter((g) => isNintendoLifeCurated(g.fs_id));
+    const nonCurated = tabGames.filter((g) => !isNintendoLifeCurated(g.fs_id));
 
     curated.sort((a, b) => (curatedMap[a.fs_id]?.rank ?? 999) - (curatedMap[b.fs_id]?.rank ?? 999));
 
@@ -641,7 +769,11 @@ export default function DealsClient() {
                   rating={ratings[game.fs_id]}
                   steam={steamRatings[game.fs_id]}
                   media={media[game.fs_id]}
-                  isCurated={game.fs_id in curatedMap}
+                  curationKind={
+                    isNintendoLifeCurated(game.fs_id)
+                      ? 'nintendolife'
+                      : (isNtDealsPick(game.fs_id) ? 'ntdeals' : null)
+                  }
                   globalMean={globalMean}
                   onHide={activeTab === 'hidden' ? handleUnhide : handleHide}
                   onWatch={handleWatch}
@@ -695,6 +827,7 @@ export default function DealsClient() {
         <GameDetailModal
           game={detailGame}
           rating={ratings[detailGame.fs_id]}
+          steam={steamRatings[detailGame.fs_id]}
           media={media[detailGame.fs_id]}
           curatedEntry={curatedMap[detailGame.fs_id]}
           onClose={() => setDetailGame(null)}

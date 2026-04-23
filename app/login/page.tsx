@@ -1,13 +1,22 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginShell loadingText="Loading..." />}>
+      <LoginPageInner />
+    </Suspense>
+  );
+}
+
+function LoginPageInner() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -22,7 +31,9 @@ export default function LoginPage() {
       });
 
       if (res.ok) {
-        router.push('/');
+        const nextPath = searchParams.get('next') || '/';
+        const target = nextPath.startsWith('/') ? nextPath : '/';
+        router.push(target);
         router.refresh();
       } else {
         setError('Wrong password');
@@ -34,9 +45,27 @@ export default function LoginPage() {
     }
   }
 
+  return <LoginShell password={password} setPassword={setPassword} loading={loading} error={error} onSubmit={handleSubmit} />;
+}
+
+function LoginShell({
+  password = '',
+  setPassword,
+  loading = false,
+  error = '',
+  loadingText = 'Enter',
+  onSubmit,
+}: {
+  password?: string;
+  setPassword?: (value: string) => void;
+  loading?: boolean;
+  error?: string;
+  loadingText?: string;
+  onSubmit?: (e: React.FormEvent) => void;
+}) {
   return (
     <div className="min-h-screen bg-white flex items-center justify-center px-6">
-      <form onSubmit={handleSubmit} className="w-full max-w-xs flex flex-col items-center gap-6">
+      <form onSubmit={onSubmit} className="w-full max-w-xs flex flex-col items-center gap-6">
         <div className="w-12 h-12 rounded-full bg-[#E60012] flex items-center justify-center">
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -66,7 +95,7 @@ export default function LoginPage() {
           <input
             type="password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => setPassword?.(e.target.value)}
             placeholder="Enter password..."
             className="w-full h-12 px-4 bg-gray-100 rounded-xl text-sm text-gray-900 placeholder-gray-400 outline-none focus:ring-2 focus:ring-[#E60012]/30"
             autoFocus
@@ -76,7 +105,7 @@ export default function LoginPage() {
             disabled={loading || !password}
             className="w-full h-12 bg-[#E60012] text-white font-semibold rounded-xl hover:bg-[#cc0010] transition-colors disabled:opacity-50"
           >
-            {loading ? 'Entering...' : 'Enter'}
+            {loading ? 'Entering...' : loadingText}
           </button>
         </div>
 

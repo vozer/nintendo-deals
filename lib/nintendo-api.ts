@@ -90,6 +90,31 @@ export async function fetchDeals(options: {
   return { games: allGames, total };
 }
 
+export async function fetchGameById(fsId: string): Promise<NintendoGame | null> {
+  const normalizedId = String(fsId || '').trim();
+  if (!/^\d+$/.test(normalizedId)) return null;
+
+  const fq = [
+    'type:GAME',
+    'system_type:nintendoswitch*',
+    `fs_id:${normalizedId}`,
+  ].join(' AND ');
+
+  const params = new URLSearchParams({
+    q: '*',
+    fq,
+    rows: '1',
+    wt: 'json',
+  });
+
+  const res = await fetch(`${NINTENDO_SOLR_URL}?${params}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Nintendo API error: ${res.status}`);
+
+  const data = await res.json();
+  const doc = (data?.response?.docs || [])[0] as NintendoGame | undefined;
+  return doc ?? null;
+}
+
 async function fetchSearchResults(query: string, maxRows: number): Promise<GamesResponse> {
   const escaped = escapeSolr(query);
   const rows = Math.min(maxRows, 100);

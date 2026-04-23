@@ -46,13 +46,15 @@ Next.js 16 · TypeScript · Tailwind CSS · Vercel Blob · IGDB API · Nintendo 
 
 ## n8n Setup (Raspberry Pi)
 
-The n8n workflow handles IGDB rating lookups and Telegram price alerts daily:
+The n8n workflows handle IGDB rating lookups, Telegram price alerts, curated digest delivery, and in-chat actions:
 
 1. Create a Twitch app at [dev.twitch.tv](https://dev.twitch.tv/console) for IGDB API access
 2. Create a Telegram bot via @BotFather
 3. Set n8n environment variables: `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `RATINGS_API_KEY`, `NINTENDO_TELEGRAM_CHAT_ID`
 4. Add Telegram credential `Nintendo Deals Bot` in n8n
-5. Activate workflow `VHlYChVKtFofIVdp`
+5. Activate workflows:
+   - `IQAxU4FrfJbU97N4` (`Nintendo Deals - Ratings, Alerts & Curated Digest`)
+   - `9MvabizSCzYJCVwn` (`Nintendo Deals - Telegram Callback Actions`)
 
 ## Environment Variables
 
@@ -64,6 +66,8 @@ The n8n workflow handles IGDB rating lookups and Telegram price alerts daily:
 | `TWITCH_CLIENT_ID` | Yes | n8n | IGDB API auth |
 | `TWITCH_CLIENT_SECRET` | Yes | n8n | IGDB API auth |
 | `NINTENDO_TELEGRAM_CHAT_ID` | Yes | n8n | Your Telegram chat ID |
+| `NINTENDO_TELEGRAM_USER_ID` | No | n8n | Allowed Telegram user for callback actions (defaults to chat id) |
+| `NINTENDO_DEALS_BASE_URL` | No | n8n | Deep link base URL for `Show` action (defaults to `https://nintendo-deals.vercel.app`) |
 
 ## Architecture
 
@@ -76,9 +80,11 @@ Vercel Blob ←──→ /api/ratings ←──────────┤
                                          │
                      /api/auth ←─────────┘
 
-n8n (Raspi, daily cron)
+n8n (Raspi)
   ├─→ IGDB API → ratings.json → /api/ratings PUT
-  └─→ preferences.json → price check → Telegram alert
+  ├─→ preferences.json → price check → Telegram alert (10:00 Europe/Madrid)
+  ├─→ curated.json + preferences.json + Nintendo deals → Telegram curated digest (10:00, top 10 actionable)
+  └─→ Telegram callback query → /api/preferences/actions POST → edit digest message state
 ```
 
 ## License

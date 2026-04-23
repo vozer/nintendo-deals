@@ -9,7 +9,7 @@ interface GameCardProps {
   rating?: GameRating;
   steam?: SteamRating;
   media?: GameMedia;
-  isCurated?: boolean;
+  curationKind?: 'nintendolife' | 'ntdeals' | null;
   globalMean?: number;
   onHide: (gameId: string) => void;
   onWatch: (gameId: string, threshold: 2 | 5 | 10, title: string) => void;
@@ -66,7 +66,7 @@ function ratingBg(score: number): string {
   return 'bg-red-50';
 }
 
-export default function GameCard({ game, preferences, rating, steam, media, isCurated, globalMean, onHide, onWatch, hideLabel = 'Hide', onUnwatch, onOpenDetail, onThink }: GameCardProps) {
+export default function GameCard({ game, preferences, rating, steam, media, curationKind, globalMean, onHide, onWatch, hideLabel = 'Hide', onUnwatch, onOpenDetail, onThink }: GameCardProps) {
   const isOnSale = game.price_has_discount_b !== false;
   const watchEntry = preferences.watchGames[game.fs_id];
   
@@ -86,7 +86,9 @@ export default function GameCard({ game, preferences, rating, steam, media, isCu
 
   const imageUrl = game.image_url_h2x1_s || game.image_url_h16x9_s || game.image_url_sq_s;
   const nintendoUrl = `https://www.nintendo.com${game.url}`;
+  const steamUrl = steam?.url;
   const categories = (game.pretty_game_categories_txt || []).slice(0, 3);
+  const hasCurationBadge = curationKind === 'nintendolife' || curationKind === 'ntdeals';
 
   const watchThresholds: (2 | 5 | 10)[] = [2, 5, 10];
 
@@ -113,14 +115,19 @@ export default function GameCard({ game, preferences, rating, steam, media, isCu
             Not on sale
           </div>
         ) : null}
-        {isCurated && (
+        {curationKind === 'nintendolife' && (
           <div className="absolute top-2 left-2 bg-yellow-400 text-yellow-900 text-xs font-bold px-2 py-1 rounded-lg flex items-center gap-1 shadow-sm z-10">
             <span>🏆 Curated</span>
           </div>
         )}
+        {curationKind === 'ntdeals' && (
+          <div className="absolute top-2 left-2 bg-blue-100 text-blue-800 text-xs font-bold px-2 py-1 rounded-lg flex items-center gap-1 shadow-sm z-10">
+            <span>💙 Deal Pick</span>
+          </div>
+        )}
         {(rating && rating.total_rating != null) || steam ? (
           <div
-            className={`absolute top-2 ${isCurated ? 'left-24' : 'left-2'} ${ratingBg(bs != null && bs >= 0 ? bs : (rating?.total_rating ?? 0))} backdrop-blur-sm text-xs font-bold px-2 py-1 rounded-lg flex items-center gap-1`}
+            className={`absolute top-2 ${hasCurationBadge ? 'left-24' : 'left-2'} ${ratingBg(bs != null && bs >= 0 ? bs : (rating?.total_rating ?? 0))} backdrop-blur-sm text-xs font-bold px-2 py-1 rounded-lg flex items-center gap-1`}
             title={bs != null && bs >= 0 ? `Score: ${Math.round(bs)}` : `Rating`}
           >
             <span className={ratingColor(bs != null && bs >= 0 ? bs : (rating?.total_rating ?? 0))}>
@@ -254,6 +261,17 @@ export default function GameCard({ game, preferences, rating, steam, media, isCu
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
               IGDB
+            </a>
+          )}
+          {steamUrl && (
+            <a
+              href={steamUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 bg-[#171a21] text-white text-xs font-semibold px-3 py-2 rounded-lg hover:bg-[#0f1116] transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M11.979 0C5.668 0 .504 4.936.034 11.134l5.856 2.426 1.76-1.76c-.052-.365-.022-.75.127-1.116.328-.802 1.259-1.191 2.061-.864l2.56-3.66c-.07-.31-.06-.636.052-.942.417-1.018 1.597-1.512 2.615-1.095 1.019.417 1.513 1.596 1.096 2.615-.417 1.018-1.597 1.512-2.615 1.095-.54-.22-.916-.683-1.07-1.188l-2.66 3.804c.28.272.5.61.622 1.002.327.802-.062 1.733-.864 2.06-.802.328-1.733-.062-2.06-.863-.12-.293-.142-.598-.086-.893l-4.757-1.97c1.558 4.28 5.626 7.33 10.59 7.33 6.627 0 12-5.373 12-12S18.606 0 11.979 0z"/></svg>
+              Steam
             </a>
           )}
 

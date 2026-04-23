@@ -38,6 +38,7 @@ npm run dev
 | `app/api/auth/` | Login/logout API (POST/DELETE) |
 | `app/api/games/` | Nintendo API proxy with search/sort/pagination/tab filters |
 | `app/api/preferences/` | Blob-backed preferences CRUD |
+| `app/api/preferences/actions/` | Atomic preference mutations for automations (`hide`, `watch`) |
 | `app/api/ratings/` | Blob-backed ratings CRUD (GET public, PUT auth via x-api-key) |
 | `app/api/media/` | Blob-backed media CRUD (GET public, PUT auth via x-api-key) |
 | `app/login/` | Password login page |
@@ -96,21 +97,26 @@ Collections and Sports tabs fetch directly from Nintendo Solr API with tab-speci
 ## Telegram Alerts
 
 - **Bot**: `@nintendo_deals_bot` (create via @BotFather)
-- **Trigger**: Daily n8n cron checks watched games with < 2€ threshold
+- **Trigger**: Daily n8n cron checks watched games against each configured threshold (`2€`, `5€`, `10€`)
 - **Format**: Game title, price, discount %, threshold, Nintendo URL
-- **n8n Workflow**: Same as IGDB ratings (`VHlYChVKtFofIVdp`)
+- **n8n Workflows**:
+  - `IQAxU4FrfJbU97N4` — Daily ratings/alerts + curated digest at 10:00 (`Europe/Madrid`)
+  - `9MvabizSCzYJCVwn` — Telegram callback actions (`Hide`, `Alert 2/5/10`)
 
 ## n8n Workflow
 
 | Workflow | ID | Purpose |
 |----------|-----|---------|
-| Nintendo Deals - IGDB Ratings & Price Alerts | `VHlYChVKtFofIVdp` | Daily 6am: fetch IGDB ratings for unrated games, check price alerts, send Telegram |
+| Nintendo Deals - Ratings, Alerts & Curated Digest | `IQAxU4FrfJbU97N4` | Daily 10:00: fetch IGDB ratings for unrated games, check price alerts, send curated digest (top 10 actionable curated games) |
+| Nintendo Deals - Telegram Callback Actions | `9MvabizSCzYJCVwn` | Handle inline Telegram button callbacks, mutate preferences, and edit digest message in-place |
 
 **Required n8n environment variables:**
 - `TWITCH_CLIENT_ID` — Twitch app Client ID for IGDB API
 - `TWITCH_CLIENT_SECRET` — Twitch app Client Secret
 - `RATINGS_API_KEY` — shared secret for PUT /api/ratings
 - `NINTENDO_TELEGRAM_CHAT_ID` — your Telegram chat ID
+- `NINTENDO_TELEGRAM_USER_ID` — optional explicit Telegram user id allowed to trigger callbacks (falls back to chat id)
+- `NINTENDO_DEALS_BASE_URL` — optional app base URL for deep links (defaults to `https://nintendo-deals.vercel.app`)
 
 **Required n8n credential:**
 - `Nintendo Deals Bot` (type: `telegramApi`) — bot token from @BotFather
@@ -168,7 +174,7 @@ Collections and Sports tabs fetch directly from Nintendo Solr API with tab-speci
 3. **Verify builds** — `npx tsc --noEmit` before deploying
 4. **Test API changes** — `curl` against deployed endpoints
 5. **Categories**: Always add new ES→EN translations to `CAT_ES_TO_EN` in GameCard.tsx
-6. **Ratings/Media API**: PUT requires `x-api-key` header matching `RATINGS_API_KEY` env var
+6. **Ratings/Media/Preferences Actions API**: automation writes require `x-api-key` header matching `RATINGS_API_KEY` env var
 7. **n8n workflow**: Uses node names in connections (not IDs)
 
 ## See Also

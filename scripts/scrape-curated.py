@@ -144,10 +144,23 @@ def main():
     print(f"\nTotal matched curated games: {len(all_entries)}")
 
     if all_entries:
+        print("Fetching existing curated data...")
+        try:
+            fetch_req = urllib.request.Request(f"{BASE_URL}/api/curated")
+            with urllib.request.urlopen(fetch_req, timeout=15) as res:
+                existing = json.loads(res.read())
+        except Exception as e:
+            print(f"  Failed to fetch existing: {e}")
+            existing = {}
+
+        non_nintendolife = {k: v for k, v in existing.items() if v.get('source') != 'nintendolife'}
+        merged = {**non_nintendolife, **all_entries}
+        print(f"Merging: {len(all_entries)} NintendoLife + {len(non_nintendolife)} other = {len(merged)} total")
+
         print("Saving to API...")
         req = urllib.request.Request(
             f"{BASE_URL}/api/curated",
-            data=json.dumps(all_entries).encode('utf-8'),
+            data=json.dumps(merged).encode('utf-8'),
             headers={'Content-Type': 'application/json', 'x-api-key': API_KEY},
             method='PUT'
         )

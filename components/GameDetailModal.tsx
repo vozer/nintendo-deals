@@ -1,22 +1,24 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { NintendoGame, GameRating, GameMedia, CuratedEntry } from '@/lib/types';
+import { NintendoGame, GameRating, GameMedia, CuratedEntry, SteamRating } from '@/lib/types';
 
 interface GameDetailModalProps {
   game: NintendoGame;
   rating?: GameRating;
+  steam?: SteamRating;
   media?: GameMedia;
   curatedEntry?: CuratedEntry;
   onClose: () => void;
 }
 
-export default function GameDetailModal({ game, rating, media, curatedEntry, onClose }: GameDetailModalProps) {
+export default function GameDetailModal({ game, rating, steam, media, curatedEntry, onClose }: GameDetailModalProps) {
   const [activeScreenshot, setActiveScreenshot] = useState(0);
   const screenshots = media?.screenshots ?? [];
   const youtubeVideo = media?.videos?.find((v) => v.type === 'youtube');
   const [showVideo, setShowVideo] = useState(!!youtubeVideo);
   const igdbUrl = media?.igdb_url;
+  const steamUrl = steam?.url;
   const nintendoUrl = `https://www.nintendo.com${game.url}`;
 
   const handleKeyDown = useCallback(
@@ -291,6 +293,17 @@ export default function GameDetailModal({ game, rating, media, curatedEntry, onC
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
                 IGDB
+              </a>
+            )}
+            {steamUrl && (
+              <a
+                href={steamUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 bg-[#171a21] text-white text-xs font-semibold px-3 py-2 rounded-lg hover:bg-[#0f1116] transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M11.979 0C5.668 0 .504 4.936.034 11.134l5.856 2.426 1.76-1.76c-.052-.365-.022-.75.127-1.116.328-.802 1.259-1.191 2.061-.864l2.56-3.66c-.07-.31-.06-.636.052-.942.417-1.018 1.597-1.512 2.615-1.095 1.019.417 1.513 1.596 1.096 2.615-.417 1.018-1.597 1.512-2.615 1.095-.54-.22-.916-.683-1.07-1.188l-2.66 3.804c.28.272.5.61.622 1.002.327.802-.062 1.733-.864 2.06-.802.328-1.733-.062-2.06-.863-.12-.293-.142-.598-.086-.893l-4.757-1.97c1.558 4.28 5.626 7.33 10.59 7.33 6.627 0 12-5.373 12-12S18.606 0 11.979 0z"/></svg>
+                Steam Reviews
               </a>
             )}
             {youtubeVideo && (

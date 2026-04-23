@@ -17,7 +17,10 @@ export function middleware(request: NextRequest) {
 
   const authCookie = request.cookies.get('nintendo-deals-auth')?.value;
   if (!authCookie || authCookie !== process.env.ACCESS_PASSWORD) {
-    return NextResponse.redirect(new URL('/login', request.url));
+    const loginUrl = new URL('/login', request.url);
+    const nextPath = `${pathname}${request.nextUrl.search}`;
+    loginUrl.searchParams.set('next', nextPath);
+    return NextResponse.redirect(loginUrl);
   }
 
   return NextResponse.next();
