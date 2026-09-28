@@ -6,6 +6,7 @@ import html
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -24,6 +25,7 @@ from automation.nintendo_worker import (
 SOLR_URL = "https://searching.nintendo-europe.com/es/select"
 IGDB_TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 IGDB_GAMES_URL = "https://api.igdb.com/v4/games"
+IGDB_REQUEST_INTERVAL = 0.35
 SOLR_FIELDS = ",".join(
     [
         "fs_id",
@@ -140,13 +142,22 @@ def fetch_igdb_candidates(title: str, client_id: str, token: str) -> list[dict[s
         },
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        detail = error.read().decode("utf-8", errors="replace")[:300]
-        raise RuntimeError(f"IGDB games request failed with HTTP {error.code}: {detail}") from error
-    return data if isinstance(data, list) else []
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            return data if isinstance(data, list) else []
+        except urllib.error.HTTPError as error:
+            detail = error.read().decode("utf-8", errors="replace")[:300]
+            if error.code != 429 or attempt == 3:
+                raise RuntimeError(f"IGDB games request failed with HTTP {error.code}: {detail}") from error
+            retry_after = error.headers.get("Retry-After")
+            try:
+                delay = float(retry_after) if retry_after else 2**attempt
+            except ValueError:
+                delay = 2**attempt
+            time.sleep(max(delay, IGDB_REQUEST_INTERVAL))
+    return []
 
 
 def enrich_ratings(
@@ -162,11 +173,13 @@ def enrich_ratings(
         game for game in games if str(game.get("fs_id", "")).strip() and str(game.get("fs_id")) not in existing
     ][: max(0, limit)]
 
-    for game in candidates_left:
+    for index, game in enumerate(candidates_left):
         fs_id = str(game["fs_id"])
         title = str(game.get("title_master_s") or game.get("title") or "").strip()
         if not title:
             continue
+        if index:
+            time.sleep(IGDB_REQUEST_INTERVAL)
         candidates = fetch_igdb_candidates(title, client_id, token)
         match, confidence = best_title_match(title, candidates)
         if not match:
