@@ -1,0 +1,34 @@
+@startuml Nintendo Deals Use Cases
+left to right direction
+
+actor "Visitor" as visitor
+actor "Deal Shopper" as shopper
+actor "Telegram User" as telegram_user
+actor "Automation Operator" as operator
+actor "Daily Scheduler" as scheduler
+actor "Deal Data Providers" as providers
+actor "Telegram Service" as telegram
+
+rectangle "Nintendo Deals" {
+    usecase "UC-001\nAccess Deal Tracker" as UC001
+    usecase "UC-002\nDiscover and Evaluate Deals" as UC002
+    usecase "UC-003\nManage Game Preferences" as UC003
+    usecase "UC-004\nRefresh Deal Intelligence" as UC004
+    usecase "UC-005\nDeliver Daily Notifications" as UC005
+    usecase "UC-006\nAct on Telegram Recommendation" as UC006
+}
+
+visitor --> UC001
+shopper --> UC002
+shopper --> UC003
+operator --> UC004
+scheduler --> UC004
+scheduler --> UC005
+providers --> UC002
+providers --> UC004
+telegram --> UC005
+telegram --> UC006
+telegram_user --> UC006
+
+@enduml
+

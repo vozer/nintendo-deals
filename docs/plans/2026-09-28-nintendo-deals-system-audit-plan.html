@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nintendo Deals: System Audit And Remediation Plan</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23e60012'/%3E%3Ccircle cx='16' cy='16' r='6' fill='white'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      --ink: #17202a;
+      --muted: #617080;
+      --paper: #fffdf7;
+      --panel: #ffffff;
+      --red: #e60012;
+      --red-dark: #9f0010;
+      --yellow: #ffd84d;
+      --blue: #1769aa;
+      --green: #147d64;
+      --line: #ded9ca;
+      --shadow: 0 18px 60px rgba(44, 32, 17, .10);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 8% 4%, rgba(255, 216, 77, .35), transparent 24rem),
+        linear-gradient(135deg, #fffdf7 0%, #f3f8fb 55%, #fff7f3 100%);
+      font: 16px/1.55 "Avenir Next", Avenir, "Segoe UI", sans-serif;
+    }
+    a { color: var(--blue); }
+    .shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; }
+    header { padding: 72px 0 40px; }
+    .eyebrow { color: var(--red); font-weight: 800; letter-spacing: .12em; text-transform: uppercase; font-size: .78rem; }
+    h1, h2, h3 { margin: 0; line-height: 1.08; letter-spacing: -.035em; }
+    h1 { max-width: 860px; margin-top: 12px; font-size: clamp(2.7rem, 7vw, 6.7rem); }
+    h2 { font-size: clamp(1.8rem, 3vw, 3rem); }
+    h3 { font-size: 1.18rem; }
+    .lede { max-width: 820px; margin: 24px 0 0; color: var(--muted); font-size: 1.18rem; }
+    .decision {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 24px;
+      align-items: center;
+      margin: 38px 0 0;
+      padding: 24px;
+      background: var(--ink);
+      color: white;
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+    }
+    .decision strong { color: var(--yellow); }
+    .pill { padding: 8px 12px; border: 1px solid rgba(255,255,255,.25); border-radius: 999px; white-space: nowrap; }
+    nav { position: sticky; top: 0; z-index: 10; border-block: 1px solid var(--line); background: rgba(255,253,247,.88); backdrop-filter: blur(16px); }
+    nav .shell { display: flex; gap: 8px; overflow-x: auto; padding-block: 10px; }
+    nav a { color: var(--ink); text-decoration: none; font-weight: 700; font-size: .9rem; padding: 8px 12px; border-radius: 999px; white-space: nowrap; }
+    nav a:hover { background: var(--yellow); }
+    section { padding: 64px 0; }
+    .section-head { display: flex; justify-content: space-between; align-items: end; gap: 24px; margin-bottom: 24px; }
+    .section-head p { max-width: 570px; margin: 0; color: var(--muted); }
+    .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; }
+    .card { grid-column: span 4; padding: 22px; border: 1px solid var(--line); border-radius: 20px; background: rgba(255,255,255,.88); box-shadow: 0 8px 28px rgba(44,32,17,.05); }
+    .card.wide { grid-column: span 6; }
+    .card.full { grid-column: 1 / -1; }
+    .metric { font-size: 2.4rem; font-weight: 900; letter-spacing: -.05em; }
+    .metric.red { color: var(--red); }
+    .metric.green { color: var(--green); }
+    .card p { margin: 8px 0 0; color: var(--muted); }
+    .severity { display: inline-block; margin-bottom: 12px; padding: 5px 9px; border-radius: 999px; font-weight: 850; font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; }
+    .p0 { color: white; background: var(--red); }
+    .p1 { color: #5b4200; background: var(--yellow); }
+    .p2 { color: white; background: var(--blue); }
+    .flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; align-items: stretch; }
+    .node { position: relative; padding: 20px; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; }
+    .node:not(:last-child)::after { content: "→"; position: absolute; right: -13px; top: 42%; z-index: 2; font-size: 1.5rem; color: var(--red); font-weight: 900; }
+    .node small { display: block; margin-top: 8px; color: var(--muted); }
+    .source-table { width: 100%; border-collapse: collapse; background: white; border-radius: 20px; overflow: hidden; box-shadow: var(--shadow); }
+    .source-table th, .source-table td { padding: 14px 16px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+    .source-table th { color: white; background: var(--ink); }
+    .source-table tr:last-child td { border-bottom: 0; }
+    .keep { color: var(--green); font-weight: 850; }
+    .drop { color: var(--red); font-weight: 850; }
+    .phases { counter-reset: phase; display: grid; gap: 14px; }
+    details { border: 1px solid var(--line); border-radius: 20px; background: rgba(255,255,255,.9); overflow: hidden; }
+    summary { display: flex; align-items: center; gap: 14px; padding: 20px 22px; cursor: pointer; font-size: 1.15rem; font-weight: 850; }
+    summary::before { counter-increment: phase; content: counter(phase); display: grid; place-items: center; width: 34px; height: 34px; flex: 0 0 auto; border-radius: 50%; color: white; background: var(--red); }
+    details[open] summary { border-bottom: 1px solid var(--line); }
+    .phase-body { padding: 8px 24px 24px 72px; }
+    li { margin: 8px 0; }
+    .gate { margin-top: 16px; padding: 14px 16px; border-left: 5px solid var(--green); background: #ecf8f3; }
+    .assumptions { padding: 28px; border-radius: 24px; color: white; background: linear-gradient(135deg, var(--red-dark), var(--red)); }
+    .assumptions a { color: white; }
+    footer { padding: 44px 0 72px; color: var(--muted); border-top: 1px solid var(--line); }
+    code { font-family: "SFMono-Regular", Consolas, monospace; font-size: .9em; }
+    @media (max-width: 800px) {
+      header { padding-top: 46px; }
+      .decision { grid-template-columns: 1fr; }
+      .section-head { display: block; }
+      .section-head p { margin-top: 12px; }
+      .card, .card.wide { grid-column: 1 / -1; }
+      .flow { grid-template-columns: 1fr; }
+      .node:not(:last-child)::after { content: "↓"; right: auto; top: auto; left: 48%; bottom: -21px; }
+      .source-table { display: block; overflow-x: auto; }
+      .phase-body { padding-left: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="shell">
+    <div class="eyebrow">Audit · 28 September 2026 · revision 65bc1ba</div>
+    <h1>Fix trust before adding more sources.</h1>
+    <p class="lede">The stack is already small enough. The problem is not missing infrastructure; it is incomplete catalog traversal, stale source semantics, whole-document state writes, and too little boundary testing.</p>
+    <div class="decision">
+      <div><strong>Recommended architecture:</strong> Vercel for the site and inbound Telegram webhook, GitHub Actions for scheduled source work and outbound messages, conditional Blob writes where concurrency matters, and immutable versioned Blob snapshots for large read-mostly enrichment maps.</div>
+      <div class="pill">No n8n · No Pi · No rewrite</div>
+    </div>
+  </header>
+
+  <nav><div class="shell">
+    <a href="#evidence">Evidence</a><a href="#findings">Findings</a><a href="#sources">Sources</a><a href="#architecture">Architecture</a><a href="#phases">Phases</a><a href="#approval">Approval</a>
+  </div></nav>
+
+  <main>
+    <section id="evidence" class="shell">
+      <div class="section-head"><h2>What the live system says</h2><p>Read-only production calls and local browser verification. No scraper, Telegram send, webhook mutation, or production write was run.</p></div>
+      <div class="grid">
+        <article class="card"><div class="metric red">3,145</div><h3>Matching Nintendo offers</h3><p>The daily worker reads only the first 1,000.</p></article>
+        <article class="card"><div class="metric red">0 → 1</div><h3>Digest candidates</h3><p>Zero in the truncated subset; one when all pages are considered.</p></article>
+        <article class="card"><div class="metric red">2</div><h3>Wrong-price cards</h3><p>Two offers pass the source filter but display 17.49 EUR.</p></article>
+        <article class="card"><div class="metric">533</div><h3>Curated records</h3><p>45 Nintendo Life and 488 NT Deals entries share one map.</p></article>
+        <article class="card"><div class="metric">3.19 MB</div><h3>Media payload</h3><p>One whole-map client fetch, before other enrichments.</p></article>
+        <article class="card"><div class="metric green">6 / 6</div><h3>Existing worker tests</h3><p>All pass, but no route-contract or browser regression tests exist.</p></article>
+      </div>
+    </section>
+
+    <section id="findings" class="shell">
+      <div class="section-head"><h2>Priority findings</h2><p>Ranked by user-visible correctness and risk of losing state, not by ease of implementation.</p></div>
+      <div class="grid">
+        <article class="card wide"><span class="severity p0">P0 · completeness</span><h3>The worker silently drops 2,145 offers</h3><p>Alerts, digest selection, and rating discovery all run on an unspecified first page. Full pagination plus direct watched-game lookup is the first fix.</p></article>
+        <article class="card wide"><span class="severity p0">P0 · source drift</span><h3>Nintendo Life ingestion is broken and semantically stale</h3><p>The parser expects the old wrapper and consumes duplicate all-time guide URLs, not current eShop Selects.</p></article>
+        <article class="card wide"><span class="severity p1">P1 · state</span><h3>Preference writes can race</h3><p>Website and Telegram actions read and overwrite one JSON document. Use Blob's documented <code>ifMatch</code> conditional write with a bounded retry instead of adding another database.</p></article>
+        <article class="card wide"><span class="severity p1">P1 · feedback</span><h3>Telegram claims success too early</h3><p>The callback is answered with success before persistence. Retried updates have no completed-update record.</p></article>
+        <article class="card wide"><span class="severity p1">P1 · UX</span><h3>Deep links fail at runtime</h3><p>Next.js 16 requires the homepage query object to be awaited. Desktop and mobile both render the list instead of the selected modal.</p></article>
+        <article class="card wide"><span class="severity p2">P2 · operability</span><h3>The scheduler can miss a day quietly</h3><p>Top-of-hour runs may be delayed, while the workflow refuses to run after its 20-minute gate.</p></article>
+      </div>
+    </section>
+
+    <section id="sources" class="shell">
+      <div class="section-head"><h2>Source-of-truth split</h2><p>More sources are useful only when each one has one narrow job and cannot overwrite a more authoritative source.</p></div>
+      <table class="source-table">
+        <thead><tr><th>Source</th><th>Decision</th><th>Use it for</th><th>Change</th></tr></thead>
+        <tbody>
+          <tr><td>Nintendo Europe</td><td class="keep">Keep</td><td>Spanish original-Switch availability and EUR price</td><td>Complete pagination, actual-price validation, explicit Switch 2 exclusion, drift monitor</td></tr>
+          <tr><td>Nintendo Life eShop Selects</td><td class="keep">Keep</td><td>Current editorial recommendation</td><td>Replace stale guide inputs with fixture-tested Selects ingestion</td></tr>
+          <tr><td>Nintendo Life Current Offers</td><td class="keep">Secondary</td><td>Discovery and comparison</td><td>Confirm every price against Nintendo</td></tr>
+          <tr><td>IGDB</td><td class="keep">Keep</td><td>Critic and user rating evidence</td><td>Refresh only missing and under-two-month games; validate platform/version</td></tr>
+          <tr><td>Steam</td><td class="keep">Optional</td><td>Review confidence and review link</td><td>Use documented review summary, not store HTML</td></tr>
+          <tr><td>SteamSpy</td><td class="keep">Cached only</td><td>Tags for existing filters and heuristics</td><td>Keep last-known tags on failure; never gate eligibility or worker success</td></tr>
+          <tr><td>NT Deals</td><td class="keep">Secondary</td><td>Blue Deal Pick signal from the Spanish Switch feed</td><td>Separate snapshot; never price authority or confidence bypass</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="architecture" class="shell">
+      <div class="section-head"><h2>Target architecture</h2><p>A deeper rewrite would add more moving parts without fixing the trust boundaries. This keeps the current runtime and storage split, adding optimistic concurrency only where state changes.</p></div>
+      <div class="flow">
+        <div class="node"><h3>Sources</h3><small>Nintendo · Nintendo Life · IGDB · Steam/SteamSpy · NT Deals</small></div>
+        <div class="node"><h3>GitHub Actions</h3><small>10:07 Madrid daily worker · weekly/manual heavy enrichment · dry-run artifacts</small></div>
+        <div class="node"><h3>Vercel data boundary</h3><small>Validated immutable snapshots · ETag-guarded preferences · replay records</small></div>
+        <div class="node"><h3>Experience</h3><small>Next.js web UI · inbound Telegram webhook · outbound daily messages</small></div>
+      </div>
+    </section>
+
+    <section id="phases" class="shell">
+      <div class="section-head"><h2>Implementation sequence</h2><p>Each phase has a hard acceptance gate. Do not start a storage migration while catalog correctness and callback behavior are still ambiguous.</p></div>
+      <div class="phases">
+        <details open><summary>Correctness at existing boundaries</summary><div class="phase-body"><ol>
+          <li>Paginate Nintendo to <code>numFound</code> and fetch watched identifiers directly.</li>
+          <li>Post-filter on the actual discounted price.</li>
+          <li>Honor search offsets and prove pages are disjoint.</li>
+          <li>Await the homepage query object and cover login-preserved deep links.</li>
+          <li>Persist Telegram actions before success feedback and use date-scoped delivery keys for retry-safe sends.</li>
+        </ol><div class="gate"><strong>Gate:</strong> full count equals source count; the known deep link opens; 17.49-EUR cards are absent; a failed callback never claims success.</div></div></details>
+        <details><summary>Source semantics and freshness</summary><div class="phase-body"><ol>
+          <li>Use eShop Selects with sanitized parser fixtures.</li>
+          <li>Keep Current Offers as comparison only.</li>
+          <li>Refresh missing and under-two-month IGDB entries with platform evidence; retain older successful matches.</li>
+          <li>Use Steam's documented review summary and retain SteamSpy only as failure-tolerant cached tags.</li>
+          <li>Separate Nintendo Life and NT Deals snapshots with provenance timestamps.</li>
+        </ol><div class="gate"><strong>Gate:</strong> source drift fails closed; both signals can coexist; only missing and new-release ratings enter a bounded queue; SteamSpy failure preserves known tags.</div></div></details>
+        <details><summary>State integrity and security</summary><div class="phase-body"><ol>
+          <li>Use ETag-guarded conditional Blob writes and bounded retry for preferences and Telegram replay state.</li>
+          <li>Migrate 157 hidden, 10 watched, and 4 thinking entries with a reversible manifest.</li>
+          <li>Replace raw-password session state with an opaque signed session.</li>
+          <li>Distinguish provider failure from an empty valid snapshot.</li>
+          <li>Validate bulk snapshot shapes and make maintenance scripts dry-run by default with explicit <code>--apply</code>.</li>
+          <li>Redact credential-bearing destinations from errors.</li>
+        </ol><div class="gate"><strong>Gate:</strong> concurrent actions preserve both changes; migration counts match; no failed read can erase a valid snapshot.</div></div></details>
+        <details><summary>Scheduling, accessibility, and operations</summary><div class="phase-body"><ol>
+          <li>Use one timezone-aware 10:07 Europe/Madrid schedule.</li>
+          <li>Publish a redacted run artifact with counts, durations, and failure stage.</li>
+          <li>Add dialog semantics, focus containment, labelled controls, and focus restoration.</li>
+          <li>Apply one original-Switch catalog contract that explicitly excludes Switch 2 in every query path.</li>
+          <li>Pin workflow actions and script dependencies, parity-test content policy, and add the AIUP documentation checker.</li>
+        </ol><div class="gate"><strong>Gate:</strong> one visible run per Madrid day; responsive and accessibility checks pass; release evidence identifies preview versus production.</div></div></details>
+      </div>
+    </section>
+
+    <section id="approval" class="shell">
+      <div class="assumptions">
+        <h2>Approval boundary</h2>
+        <p>Plan approval authorizes implementation and local deterministic testing only. It does not authorize a production scraper run, preference migration, Telegram message send, webhook reconfiguration, git push, or production Vercel promotion.</p>
+        <p>Defaults included in the plan: only original Switch offers remain in scope; the daily run moves to 10:07 Madrid; NT Deals remains a secondary Deal Pick from its Spanish Switch feed; SteamSpy remains optional cached tag enrichment; preferences stay in Blob and gain conditional writes rather than a second database.</p>
+        <p><a href="2026-09-28-nintendo-deals-system-audit-plan.md">Open the complete Markdown plan</a> · <a href="../research/2026-09-28-nintendo-deals-source-audit.md">Open primary-source research</a> · <a href="../requirements.md">Open requirements</a></p>
+      </div>
+    </section>
+  </main>
+
+  <footer><div class="shell">Nintendo Deals audit · read-only live evidence · no production mutation performed</div></footer>
+</body>
+</html>
