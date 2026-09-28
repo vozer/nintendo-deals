@@ -1,0 +1,66 @@
+name: Nintendo Deals Daily
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Fetch and calculate only; do not write ratings or send Telegram messages
+        required: false
+        default: true
+        type: boolean
+  schedule:
+    # Run at both possible UTC hours; the job keeps only the one that is 10:00 in Madrid.
+    - cron: '0 8 * * *'
+    - cron: '0 9 * * *'
+
+concurrency:
+  group: nintendo-deals-daily
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check Europe/Madrid schedule window
+        id: schedule
+        if: github.event_name == 'schedule'
+        shell: bash
+        run: |
+          hour="$(TZ=Europe/Madrid date +%H)"
+          minute="$(TZ=Europe/Madrid date +%M)"
+          if [[ "$hour" == "10" && "$minute" -lt 20 ]]; then
+            echo "run_worker=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_worker=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Select run mode
+        id: mode
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run }}" == "true" ]]; then
+            echo "dry_run=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "dry_run=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run daily worker
+        if: github.event_name == 'workflow_dispatch' || steps.schedule.outputs.run_worker == 'true'
+        env:
+          NINTENDO_DEALS_BASE_URL: ${{ secrets.NINTENDO_DEALS_BASE_URL }}
+          RATINGS_API_KEY: ${{ secrets.RATINGS_API_KEY }}
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DRY_RUN: ${{ steps.mode.outputs.dry_run }}
+        run: python automation/run_daily.py

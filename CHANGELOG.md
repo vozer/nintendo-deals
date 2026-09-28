@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Replaced the lost n8n automation with a GitHub Actions daily worker for IGDB ratings, price alerts, and one-message-per-game curated Telegram digests.
+- Added a Vercel Telegram webhook for authenticated `Hide` and `Alert 2/5/10` callback actions with idempotent preference updates and message status edits.
+- Added local worker rule tests covering digest filtering, watched-game exclusion, price thresholds, callback validation, and readable game context.
+
 ## [1.8.0] - 2026-03-10
 
 ### Added

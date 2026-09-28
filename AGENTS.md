@@ -15,12 +15,12 @@ Personal Nintendo eShop deal tracker. Displays Switch games on sale in the Spani
 | Styling | Tailwind CSS |
 | Storage | Vercel Blob (private store) |
 | Data source | Nintendo Europe Solr API |
-| Ratings | IGDB API (via n8n daily cron) |
+| Ratings | IGDB API (via GitHub Actions daily worker) |
 | Media | Nintendo pages + IGDB fallback |
-| Alerts | Telegram bot (via n8n daily cron) |
+| Alerts | Telegram bot (via GitHub Actions daily worker) |
 | Hosting | Vercel (fra1 region) |
 | Auth | Cookie-based password gate |
-| Automation | n8n on Raspberry Pi |
+| Automation | GitHub Actions daily worker + Vercel Telegram webhook |
 
 ## Quick Start
 
@@ -39,6 +39,7 @@ npm run dev
 | `app/api/games/` | Nintendo API proxy with search/sort/pagination/tab filters |
 | `app/api/preferences/` | Blob-backed preferences CRUD |
 | `app/api/preferences/actions/` | Atomic preference mutations for automations (`hide`, `watch`) |
+| `app/api/telegram/` | Telegram callback webhook and digest-message updates |
 | `app/api/ratings/` | Blob-backed ratings CRUD (GET public, PUT auth via x-api-key) |
 | `app/api/media/` | Blob-backed media CRUD (GET public, PUT auth via x-api-key) |
 | `app/login/` | Password login page |
@@ -61,6 +62,8 @@ npm run dev
 | `components/GameDetailModal.tsx` | Fullscreen detail modal with screenshot carousel, YouTube embed, game info |
 | `components/DealsClient.tsx` | Main page: 5 tabs, grid, search, sort, optimistic updates, ratings/media integration |
 | `scripts/media-backfill.py` | Backfill media for all games: Nintendo scraping + IGDB fallback, incremental saves |
+| `automation/` | One-shot daily ratings, price-alert, and curated-digest worker |
+| `.github/workflows/nintendo-deals-daily.yml` | DST-safe daily worker schedule and manual replay |
 | `vercel.json` | Vercel config: region, headers, build settings |
 
 ## Content Filtering
@@ -77,7 +80,7 @@ Collections and Sports tabs fetch directly from Nintendo Solr API with tab-speci
 
 - **Storage**: `ratings.json` in Vercel Blob (alongside `preferences.json`)
 - **Source**: IGDB API (free, Twitch OAuth, 4 req/sec limit)
-- **Update**: Daily n8n cron workflow on Raspberry Pi
+- **Update**: Daily GitHub Actions worker
 - **Matching**: Title normalization + Levenshtein distance, ≥70% confidence threshold
 - **Display**: Critic badge (🎬), User badge (👤), Combined badge (⭐) — color-coded green/yellow/red
 - **Sort**: "Rating ★" (by combined score) and "Best Value" (price + rating)
@@ -96,30 +99,39 @@ Collections and Sports tabs fetch directly from Nintendo Solr API with tab-speci
 
 ## Telegram Alerts
 
-- **Bot**: `@nintendo_deals_bot` (create via @BotFather)
-- **Trigger**: Daily n8n cron checks watched games against each configured threshold (`2€`, `5€`, `10€`)
+- **Bot**: `@nintendo_deals2_bot` (create via @BotFather)
+- **Trigger**: Daily GitHub Actions worker checks watched games against each configured threshold (`2€`, `5€`, `10€`)
 - **Format**: Game title, price, discount %, threshold, Nintendo URL
-- **n8n Workflows**:
-  - `IQAxU4FrfJbU97N4` — Daily ratings/alerts + curated digest at 10:00 (`Europe/Madrid`)
-  - `9MvabizSCzYJCVwn` — Telegram callback actions (`Hide`, `Alert 2/5/10`)
+- **Telegram callbacks**: Vercel `POST /api/telegram/webhook` validates the configured chat/user, applies atomic preference actions, and edits the original digest message.
+- **GitHub Actions**: `.github/workflows/nintendo-deals-daily.yml` runs the one-shot worker with `workflow_dispatch` for replay and a concurrency lock to prevent overlapping writes.
 
-## n8n Workflow
+## Recovered n8n Lineage and Replacement
 
-| Workflow | ID | Purpose |
-|----------|-----|---------|
-| Nintendo Deals - Ratings, Alerts & Curated Digest | `IQAxU4FrfJbU97N4` | Daily 10:00: fetch IGDB ratings for unrated games, check price alerts, send curated digest (top 10 actionable curated games) |
-| Nintendo Deals - Telegram Callback Actions | `9MvabizSCzYJCVwn` | Handle inline Telegram button callbacks, mutate preferences, and edit digest message in-place |
+The original n8n graph was not recovered. Historical IDs are retained only for forensic comparison:
 
-**Required n8n environment variables:**
+- `IQAxU4FrfJbU97N4` — previous daily ratings/alerts/digest workflow
+- `9MvabizSCzYJCVwn` — previous Telegram callback workflow
+- `VHlYChVKtFofIVdp` — superseded 06:00 workflow lineage
+
+The replacement is:
+
+- GitHub Actions runs `python automation/run_daily.py` at 10:00 Europe/Madrid.
+- Vercel handles Telegram `callback_query` updates at `/api/telegram/webhook`.
+- Telegram uses webhook delivery only; no polling consumer is allowed.
+
+**Required GitHub Actions secrets:**
 - `TWITCH_CLIENT_ID` — Twitch app Client ID for IGDB API
 - `TWITCH_CLIENT_SECRET` — Twitch app Client Secret
 - `RATINGS_API_KEY` — shared secret for PUT /api/ratings
-- `NINTENDO_TELEGRAM_CHAT_ID` — your Telegram chat ID
-- `NINTENDO_TELEGRAM_USER_ID` — optional explicit Telegram user id allowed to trigger callbacks (falls back to chat id)
-- `NINTENDO_DEALS_BASE_URL` — optional app base URL for deep links (defaults to `https://nintendo-deals.vercel.app`)
+- `NINTENDO_DEALS_BASE_URL` — app base URL for deep links
+- `TELEGRAM_BOT_TOKEN` — bot token from @BotFather
+- `TELEGRAM_CHAT_ID` — destination chat for outbound alerts/digest
 
-**Required n8n credential:**
-- `Nintendo Deals Bot` (type: `telegramApi`) — bot token from @BotFather
+**Required Vercel environment variables:**
+- `TELEGRAM_BOT_TOKEN` — bot token used by the webhook for callback responses
+- `TELEGRAM_WEBHOOK_SECRET` — Telegram webhook secret header value
+- `NINTENDO_TELEGRAM_CHAT_ID` — allowed Telegram chat ID
+- `NINTENDO_TELEGRAM_USER_ID` — optional allowed Telegram user ID
 
 ## Nintendo Solr API
 
@@ -136,7 +148,7 @@ Collections and Sports tabs fetch directly from Nintendo Solr API with tab-speci
 - **Region**: fra1 (Frankfurt)
 - **Auto-deploy**: OFF — use `npx vercel --prod --yes` to deploy
 - **URL**: https://nintendo-deals.vercel.app
-- **Env vars**: `ACCESS_PASSWORD`, `nintendo_READ_WRITE_TOKEN` (Blob), `RATINGS_API_KEY`
+- **Env vars**: `ACCESS_PASSWORD`, `nintendo_READ_WRITE_TOKEN` (Blob), `RATINGS_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `NINTENDO_TELEGRAM_CHAT_ID`
 
 ## Conventions
 
@@ -147,6 +159,7 @@ Collections and Sports tabs fetch directly from Nintendo Solr API with tab-speci
 - Ratings stored in Vercel Blob (private store, single `ratings.json` file)
 - Media stored in Vercel Blob (private store, single `media.json` file)
 - Blob has ~2s eventual consistency on overwrites; reads use direct URL fetch with cache-busting
+- GitHub Actions uses a concurrency group so whole-map ratings writes cannot overlap
 - Optimistic updates: Client updates state immediately, persists to Blob in background
 - Watch thresholds: 2€, 5€, 10€
 - "Thinking about it" list: games bookmarked for later, hidden from Deals tab
@@ -175,7 +188,8 @@ Collections and Sports tabs fetch directly from Nintendo Solr API with tab-speci
 4. **Test API changes** — `curl` against deployed endpoints
 5. **Categories**: Always add new ES→EN translations to `CAT_ES_TO_EN` in GameCard.tsx
 6. **Ratings/Media/Preferences Actions API**: automation writes require `x-api-key` header matching `RATINGS_API_KEY` env var
-7. **n8n workflow**: Uses node names in connections (not IDs)
+7. **Telegram**: Use webhook delivery only; never add a polling consumer beside `/api/telegram/webhook`
+8. **GitHub Actions**: Secrets are passed through the job environment and never written to workflow YAML or logs
 
 ## See Also
 
