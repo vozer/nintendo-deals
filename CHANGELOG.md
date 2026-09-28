@@ -12,6 +12,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added a Vercel Telegram webhook for authenticated `Hide` and `Alert 2/5/10` callback actions with idempotent preference updates and message status edits.
 - Added local worker rule tests covering digest filtering, watched-game exclusion, price thresholds, callback validation, and readable game context.
 
+### Fixed
+
+- Fixed the GitHub Actions worker entrypoint and throttled/retried IGDB lookups to avoid burst-rate failures. The 2026-09-28 dry-run completed successfully; it found no eligible digest item because current active deals contain no unhidden Nintendo Life pick under the configured price cap.
+
 ## [1.8.0] - 2026-03-10
 
 ### Added
