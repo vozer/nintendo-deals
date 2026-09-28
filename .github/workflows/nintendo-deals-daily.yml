@@ -63,4 +63,4 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DRY_RUN: ${{ steps.mode.outputs.dry_run }}
-        run: python automation/run_daily.py
+        run: python -m automation.run_daily
