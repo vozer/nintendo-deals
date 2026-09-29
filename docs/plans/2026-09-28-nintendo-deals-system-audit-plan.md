@@ -1,7 +1,7 @@
 # Nintendo Deals System Audit And Remediation Plan
 
 **Date:** 2026-09-28  
-**Plan status:** Implemented locally; production release pending separate approval
+**Plan status:** Implemented and deployed; first scheduled worker run and side-effecting production tests remain pending
 **Audited revision:** `65bc1bac57313dea8f12c04bdf141a6bdf427ff0`  
 **Evidence:** [Source audit](../research/2026-09-28-nintendo-deals-source-audit.md), [requirements](../requirements.md), [use cases](../use_cases.puml), [entity model](../entity_model.md)
 
@@ -205,12 +205,15 @@ Weekly or manual GitHub Actions
 
 ## Approval Boundary
 
-Approval of this document authorizes implementation and local deterministic testing only. It does not authorize a production scraper run, a production preference migration, Telegram message delivery, webhook reconfiguration, a git push, or a production Vercel promotion. Each of those keeps its existing explicit gate.
+The original approval authorized implementation and local deterministic testing only. On 2026-09-29, the user separately authorized pushing to `main`, promoting to the existing production Vercel project, and read-only production HTTP smoke tests. A production worker/scraper run, preference mutation/migration, Telegram message delivery, and webhook reconfiguration remain unrun because they create persistent or irreversible effects and require a reviewed target manifest.
 
-## Local Implementation Evidence
+## Implementation And Release Evidence
 
 - TypeScript: `npx tsc --noEmit` passed; ESLint passed without warnings; Vitest passed 38 tests.
 - Python: 33 `unittest` tests and `py_compile` passed.
 - Build and browser: `npm run build` passed; Playwright passed the deep-link/dialog journey at 375px and 1200px.
 - Documentation and automation syntax: `npm run check:aiup`, workflow YAML parsing, and shell syntax checks passed.
-- Not exercised: GitHub Actions schedule delivery, live source refreshes, production Blob preference migration, real Telegram delivery/callback, Vercel deployment, or automated serious/critical accessibility scanning. These remain separate release checks.
+- Production release: commit `5e83df6` was pushed to `main`; Vercel production deployment `dpl_BX9KnqMtXPrujFqkcsuLRbrfPquC` is Ready and aliased to `https://nintendo-deals.vercel.app`.
+- Production HTTP checks: deep-link login redirect preserved `/?game=1337462`; login returned 200; protected catalog/game APIs redirected to login; curated, ratings, media, and Steam GET APIs returned 200; unauthenticated preference/action writes returned 401.
+- Worker configuration: GitHub repository variable `NINTENDO_DEALS_BASE_URL` is configured to the canonical public app URL; the workflow reads it as a variable, not a secret.
+- Not exercised: a live GitHub Actions schedule/worker run, source snapshot publication, production preference writes/migration, real Telegram delivery/callback, webhook reconfiguration, or automated serious/critical accessibility scanning. The worker can overwrite production snapshots and send irreversible messages; these require a specific reviewed run manifest and approval. The next daily schedule is the first natural end-to-end worker check.

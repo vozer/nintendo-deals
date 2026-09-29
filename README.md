@@ -50,7 +50,7 @@ The daily GitHub Actions worker handles IGDB rating lookups, Telegram price aler
 
 1. Create a Twitch app at [dev.twitch.tv](https://dev.twitch.tv/console) for IGDB API access
 2. Create a Telegram bot via @BotFather
-3. Add the repository secrets listed below to GitHub Actions
+3. Add the repository secrets and variables listed below to GitHub Actions
 4. Set the Vercel Telegram webhook environment variables listed below
 5. Configure Telegram to deliver updates to `POST /api/telegram/webhook`:
 
@@ -74,7 +74,7 @@ curl "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
 | `TELEGRAM_WEBHOOK_SECRET` | Yes | Vercel | Secret header used to authenticate Telegram webhooks |
 | `NINTENDO_TELEGRAM_CHAT_ID` | Yes | Vercel | Allowed Telegram chat for callback actions |
 | `NINTENDO_TELEGRAM_USER_ID` | No | Vercel | Optional allowed Telegram user for callback actions |
-| `NINTENDO_DEALS_BASE_URL` | Yes | GitHub Actions | App base URL for `Show` links |
+| `NINTENDO_DEALS_BASE_URL` | Yes | GitHub Actions variable | Public app URL for `Show` links and API calls |
 
 ## Architecture
 

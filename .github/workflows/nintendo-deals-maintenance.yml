@@ -42,14 +42,14 @@ jobs:
         env:
           OPERATION: ${{ inputs.operation }}
           DRY_RUN: ${{ inputs.dry_run }}
-          NINTENDO_DEALS_BASE_URL: ${{ secrets.NINTENDO_DEALS_BASE_URL }}
+          NINTENDO_DEALS_BASE_URL: ${{ vars.NINTENDO_DEALS_BASE_URL }}
           RATINGS_API_KEY: ${{ secrets.RATINGS_API_KEY }}
           TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
           TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
         shell: bash
         run: |
           set -euo pipefail
-          : "${NINTENDO_DEALS_BASE_URL:?NINTENDO_DEALS_BASE_URL secret is required}"
+          : "${NINTENDO_DEALS_BASE_URL:?NINTENDO_DEALS_BASE_URL repository variable is required}"
           script=""
           case "$OPERATION" in
             ntdeals) script="scripts/scrape-ntdeals.py" ;;

@@ -56,7 +56,7 @@ jobs:
         id: curation
         if: github.event_name == 'workflow_dispatch' || steps.schedule.outputs.run_worker == 'true'
         env:
-          NINTENDO_DEALS_BASE_URL: ${{ secrets.NINTENDO_DEALS_BASE_URL }}
+          NINTENDO_DEALS_BASE_URL: ${{ vars.NINTENDO_DEALS_BASE_URL }}
           RATINGS_API_KEY: ${{ secrets.RATINGS_API_KEY }}
           DRY_RUN: ${{ steps.mode.outputs.dry_run }}
           NINTENDO_DEALS_CURATION_SUMMARY_PATH: curated-run-summary.json
@@ -65,7 +65,7 @@ jobs:
           if [[ "$DRY_RUN" == "1" ]]; then
             python scripts/scrape-curated.py
           else
-            : "${NINTENDO_DEALS_BASE_URL:?NINTENDO_DEALS_BASE_URL secret is required for publishing}"
+            : "${NINTENDO_DEALS_BASE_URL:?NINTENDO_DEALS_BASE_URL repository variable is required for publishing}"
             python scripts/scrape-curated.py --base-url "$NINTENDO_DEALS_BASE_URL" --apply
           fi
 
@@ -73,7 +73,7 @@ jobs:
         id: worker
         if: github.event_name == 'workflow_dispatch' || steps.schedule.outputs.run_worker == 'true'
         env:
-          NINTENDO_DEALS_BASE_URL: ${{ secrets.NINTENDO_DEALS_BASE_URL }}
+          NINTENDO_DEALS_BASE_URL: ${{ vars.NINTENDO_DEALS_BASE_URL }}
           RATINGS_API_KEY: ${{ secrets.RATINGS_API_KEY }}
           TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
           TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
