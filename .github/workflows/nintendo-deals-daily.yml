@@ -4,14 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: Fetch and calculate only; do not write ratings or send Telegram messages
+        description: Fetch and calculate only; do not publish source snapshots, ratings, or Telegram messages
         required: false
         default: true
         type: boolean
   schedule:
-    # Run at both possible UTC hours; the job keeps only the one that is 10:00 in Madrid.
-    - cron: '0 8 * * *'
-    - cron: '0 9 * * *'
+    # GitHub cron is UTC; both candidate hours are gated to the single 10:07 Madrid run across DST.
+    - cron: '7 8,9 * * *'
 
 concurrency:
   group: nintendo-deals-daily
@@ -37,7 +36,7 @@ jobs:
         run: |
           hour="$(TZ=Europe/Madrid date +%H)"
           minute="$(TZ=Europe/Madrid date +%M)"
-          if [[ "$hour" == "10" && "$minute" -lt 20 ]]; then
+          if [[ "$hour" == "10" && "$minute" -ge 7 && "$minute" -le 15 ]]; then
             echo "run_worker=true" >> "$GITHUB_OUTPUT"
           else
             echo "run_worker=false" >> "$GITHUB_OUTPUT"
@@ -53,7 +52,25 @@ jobs:
             echo "dry_run=0" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Refresh Nintendo Life eShop Selects
+        id: curation
+        if: github.event_name == 'workflow_dispatch' || steps.schedule.outputs.run_worker == 'true'
+        env:
+          NINTENDO_DEALS_BASE_URL: ${{ secrets.NINTENDO_DEALS_BASE_URL }}
+          RATINGS_API_KEY: ${{ secrets.RATINGS_API_KEY }}
+          DRY_RUN: ${{ steps.mode.outputs.dry_run }}
+          NINTENDO_DEALS_CURATION_SUMMARY_PATH: curated-run-summary.json
+        shell: bash
+        run: |
+          if [[ "$DRY_RUN" == "1" ]]; then
+            python scripts/scrape-curated.py
+          else
+            : "${NINTENDO_DEALS_BASE_URL:?NINTENDO_DEALS_BASE_URL secret is required for publishing}"
+            python scripts/scrape-curated.py --base-url "$NINTENDO_DEALS_BASE_URL" --apply
+          fi
+
       - name: Run daily worker
+        id: worker
         if: github.event_name == 'workflow_dispatch' || steps.schedule.outputs.run_worker == 'true'
         env:
           NINTENDO_DEALS_BASE_URL: ${{ secrets.NINTENDO_DEALS_BASE_URL }}
@@ -63,4 +80,65 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DRY_RUN: ${{ steps.mode.outputs.dry_run }}
+          NINTENDO_DEALS_SUMMARY_PATH: daily-run-summary.json
         run: python -m automation.run_daily
+
+      - name: Create redacted run summary
+        if: always()
+        env:
+          CURATION_OUTCOME: ${{ steps.curation.outcome }}
+          WORKER_OUTCOME: ${{ steps.worker.outcome }}
+          RUN_ID: ${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          allowed = {
+              "catalog_records", "watched_games", "ratings_records",
+              "nintendolife_entries", "ntdeals_entries", "nintendolife_duration_seconds", "nintendolife_source_entries",
+              "nintendolife_matches", "nintendolife_rejections", "rating_updates",
+              "duration_seconds", "failure_stage", "games", "price_alerts", "digest_items",
+              "price_alerts_sent", "digest_messages_sent",
+          }
+          metrics = {}
+          for filename in ("curated-run-summary.json", "daily-run-summary.json"):
+              source = Path(filename)
+              if source.exists():
+                  values = json.loads(source.read_text())
+                  if not isinstance(values, dict):
+                      raise ValueError(f"{filename} is not a JSON object")
+                  metrics.update({key: value for key, value in values.items() if key in allowed})
+          outcomes = [os.environ.get("CURATION_OUTCOME", ""), os.environ.get("WORKER_OUTCOME", "")]
+          status = "failure" if "failure" in outcomes else "cancelled" if "cancelled" in outcomes else (
+              "skipped" if all(value == "skipped" for value in outcomes) else "success"
+          )
+          failure_stage = metrics.pop("failure_stage", None)
+          if status == "failure" and not failure_stage:
+              failure_stage = "nintendolife_refresh" if outcomes[0] == "failure" else "daily_worker"
+          summary = {
+              "status": status,
+              "run_id": os.environ["RUN_ID"],
+              "commit": os.environ["COMMIT_SHA"],
+              "finished_at": datetime.now(timezone.utc).isoformat(),
+              "metrics": {key: value for key, value in metrics.items() if key in allowed and key != "failure_stage" and type(value) is int},
+          }
+          if failure_stage:
+              summary["failure_stage"] = failure_stage
+          Path("redacted-summary.json").write_text(json.dumps(summary, sort_keys=True) + "\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as output:
+              output.write(f"## Nintendo Deals run: {summary['status']}\n\n")
+              output.write(f"Run `{summary['run_id']}` at `{summary['finished_at']}`.\n\n")
+              output.write("Counts: " + json.dumps(summary["metrics"], sort_keys=True) + "\n")
+          PY
+
+      - name: Upload redacted run summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nintendo-deals-run-summary-${{ github.run_id }}
+          path: redacted-summary.json
+          if-no-files-found: error
+          retention-days: 30

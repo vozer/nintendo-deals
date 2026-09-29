@@ -1,4 +1,5 @@
-import { getPreferencesStrict, savePreferences } from '@/lib/blob-storage';
+import { updatePreferencesAtomically } from '@/lib/blob-storage';
+import contentPolicy from '@/shared/content-policy.json';
 
 export type PreferencesActionPayload = {
   action: 'hide' | 'unhide' | 'watch' | 'unwatch' | 'think' | 'unthink' | 'toggle_thinking';
@@ -22,7 +23,7 @@ const GAME_ID_PATTERN = /^\d+$/;
 async function fetchTitleFromNintendo(fsId: string): Promise<string | null> {
   const params = new URLSearchParams({
     q: '*',
-    fq: `type:GAME AND system_type:nintendoswitch* AND fs_id:${fsId}`,
+    fq: `type:GAME AND system_type:${contentPolicy.switchSystemPrefix}* AND -system_type:${contentPolicy.excludedSystemType} AND fs_id:${fsId}`,
     rows: '1',
     wt: 'json',
     fl: 'title,title_master_s',
@@ -65,87 +66,85 @@ export function parsePreferencesAction(body: unknown): PreferencesActionPayload 
   };
 }
 
-export async function applyPreferencesAction(parsed: PreferencesActionPayload) {
-  const current = await getPreferencesStrict();
-  const next = {
-    hiddenGames: Array.isArray(current.hiddenGames) ? [...current.hiddenGames] : [],
-    watchGames: { ...(current.watchGames || {}) },
-    thinkingAbout: Array.isArray(current.thinkingAbout) ? [...current.thinkingAbout] : [],
-  };
-
+export async function applyPreferencesAction(
+  parsed: PreferencesActionPayload,
+  telegramUpdateId?: string,
+) {
   let changed = false;
+  let titleLookup: Promise<string | null> | null = null;
+  const result = await updatePreferencesAtomically(async (current) => {
+    const next = {
+      hiddenGames: [...current.hiddenGames],
+      watchGames: { ...current.watchGames },
+      thinkingAbout: [...current.thinkingAbout],
+    };
 
-  switch (parsed.action) {
-    case 'hide': {
-      if (!next.hiddenGames.includes(parsed.fs_id)) {
-        next.hiddenGames.push(parsed.fs_id);
-        changed = true;
+    changed = false;
+    switch (parsed.action) {
+      case 'hide':
+        if (!next.hiddenGames.includes(parsed.fs_id)) {
+          next.hiddenGames.push(parsed.fs_id);
+          changed = true;
+        }
+        break;
+      case 'unhide': {
+        const before = next.hiddenGames.length;
+        next.hiddenGames = next.hiddenGames.filter((id) => id !== parsed.fs_id);
+        changed = next.hiddenGames.length !== before;
+        break;
       }
-      break;
-    }
-    case 'unhide': {
-      const before = next.hiddenGames.length;
-      next.hiddenGames = next.hiddenGames.filter((id) => id !== parsed.fs_id);
-      changed = next.hiddenGames.length !== before;
-      break;
-    }
-    case 'watch': {
-      const threshold = parsed.threshold as 2 | 5 | 10;
-      const existing = next.watchGames[parsed.fs_id];
-      let title = parsed.title?.trim() || existing?.title || '';
-
-      if (!title) {
-        title = (await fetchTitleFromNintendo(parsed.fs_id)) || parsed.fs_id;
+      case 'watch': {
+        const threshold = parsed.threshold as 2 | 5 | 10;
+        const existing = next.watchGames[parsed.fs_id];
+        let title = parsed.title?.trim() || existing?.title || '';
+        if (!title) {
+          titleLookup ??= fetchTitleFromNintendo(parsed.fs_id);
+          title = (await titleLookup) || parsed.fs_id;
+        }
+        if (!existing || existing.threshold !== threshold || existing.title !== title) {
+          next.watchGames[parsed.fs_id] = { threshold, title };
+          changed = true;
+        }
+        break;
       }
-
-      if (!existing || existing.threshold !== threshold || existing.title !== title) {
-        next.watchGames[parsed.fs_id] = { threshold, title };
-        changed = true;
-      }
-      break;
-    }
-    case 'unwatch': {
-      if (next.watchGames[parsed.fs_id]) {
-        delete next.watchGames[parsed.fs_id];
-        changed = true;
-      }
-      break;
-    }
-    case 'think': {
-      if (!next.thinkingAbout.includes(parsed.fs_id)) {
-        next.thinkingAbout.push(parsed.fs_id);
-        changed = true;
-      }
-      break;
-    }
-    case 'unthink': {
-      const before = next.thinkingAbout.length;
-      next.thinkingAbout = next.thinkingAbout.filter((id) => id !== parsed.fs_id);
-      changed = next.thinkingAbout.length !== before;
-      break;
-    }
-    case 'toggle_thinking': {
-      if (next.thinkingAbout.includes(parsed.fs_id)) {
+      case 'unwatch':
+        if (next.watchGames[parsed.fs_id]) {
+          delete next.watchGames[parsed.fs_id];
+          changed = true;
+        }
+        break;
+      case 'think':
+        if (!next.thinkingAbout.includes(parsed.fs_id)) {
+          next.thinkingAbout.push(parsed.fs_id);
+          changed = true;
+        }
+        break;
+      case 'unthink': {
+        const before = next.thinkingAbout.length;
         next.thinkingAbout = next.thinkingAbout.filter((id) => id !== parsed.fs_id);
-      } else {
-        next.thinkingAbout.push(parsed.fs_id);
+        changed = next.thinkingAbout.length !== before;
+        break;
       }
-      changed = true;
-      break;
+      case 'toggle_thinking':
+        if (next.thinkingAbout.includes(parsed.fs_id)) {
+          next.thinkingAbout = next.thinkingAbout.filter((id) => id !== parsed.fs_id);
+        } else {
+          next.thinkingAbout.push(parsed.fs_id);
+        }
+        changed = true;
+        break;
     }
-  }
-
-  if (changed) {
-    await savePreferences(next);
-  }
+    return next;
+  }, telegramUpdateId);
 
   return {
-    changed,
+    changed: result.duplicate ? false : changed,
+    duplicate: result.duplicate,
     game: {
       fs_id: parsed.fs_id,
-      hidden: next.hiddenGames.includes(parsed.fs_id),
-      watch: next.watchGames[parsed.fs_id] || null,
-      thinking: next.thinkingAbout.includes(parsed.fs_id),
+      hidden: result.preferences.hiddenGames.includes(parsed.fs_id),
+      watch: result.preferences.watchGames[parsed.fs_id] || null,
+      thinking: result.preferences.thinkingAbout.includes(parsed.fs_id),
     },
   };
 }

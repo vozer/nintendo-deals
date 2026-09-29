@@ -56,7 +56,7 @@ export async function GET() {
 }
 
 export async function PUT(req: NextRequest) {
-  if (!isAuthorizedRequest(req)) {
+  if (!await isAuthorizedRequest(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

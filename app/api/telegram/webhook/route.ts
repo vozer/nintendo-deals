@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
     }
 
     const action = parseTelegramCallback(callback.data);
-    if (!action) {
+    if (!action || typeof callback.id !== 'string' || !callback.id) {
       await telegramRequest(botToken, 'answerCallbackQuery', {
         callback_query_id: callback.id,
         text: 'Unsupported action',
@@ -54,18 +54,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Invalid callback' });
     }
 
+    const result = await applyPreferencesAction(action, callback.id);
+
     await telegramRequest(botToken, 'answerCallbackQuery', {
       callback_query_id: callback.id,
-      text: action.action === 'hide' ? 'Game hidden' : `Alert set under ${action.threshold}€`,
+      text: result.changed
+        ? action.action === 'hide' ? 'Game hidden' : `Alert set under ${action.threshold}€`
+        : action.action === 'hide' ? 'Game is already hidden' : `Alert is already set under ${action.threshold}€`,
     });
 
-    const result = await applyPreferencesAction(action);
     if (typeof message?.message_id !== 'number' || typeof message?.text !== 'string') {
       return NextResponse.json({ ok: true, changed: result.changed });
-    }
-
-    if (!result.changed) {
-      return NextResponse.json({ ok: true, changed: false, game: result.game });
     }
 
     const baseUrl = process.env.NINTENDO_DEALS_BASE_URL || new URL(req.url).origin;

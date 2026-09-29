@@ -5,7 +5,7 @@ import { applyPreferencesAction, parsePreferencesAction } from '@/lib/preference
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
-  if (!isAuthorizedRequest(req)) {
+  if (!await isAuthorizedRequest(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

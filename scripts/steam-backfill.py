@@ -1,3 +1,4 @@
+import argparse
 import urllib.request
 import urllib.parse
 import json
@@ -6,10 +7,11 @@ import re
 import os
 import sys
 import unicodedata
+from datetime import datetime, timezone
+
+from automation.content_policy import MAX_DISCOUNTED_PRICE_EUR, ORIGINAL_SWITCH_FILTER, is_original_switch_game
 
 API_KEY = os.environ.get('RATINGS_API_KEY', '')
-BASE_URL = "https://nintendo-deals.vercel.app"
-SAVE_EVERY = 20
 
 
 def normalize(value):
@@ -21,10 +23,7 @@ def normalize(value):
 
 
 SWITCH_SUFFIXES_RE = re.compile(
-    r'\s*[-:]\s*(Legacy|XL|DX|Deluxe|Definitive|Complete|Enhanced|'
-    r'Final|Anniversary|Ultimate|Remastered|Special|Gold|Premium|'
-    r'Platinum|Extended|for Nintendo Switch|Nintendo Switch Edition|'
-    r'Switch Edition)\s*(Edition|Version|Cut)?\s*$',
+    r'\s*[-:]?\s*(for Nintendo Switch|Nintendo Switch Edition|Switch Edition)\s*$',
     re.IGNORECASE,
 )
 
@@ -42,19 +41,13 @@ def _steam_search(query):
 
 
 def _match_items(items, norm_title):
-    for item in items[:5]:
-        if normalize(item['name']) == norm_title:
-            return item['id']
-    for item in items[:5]:
-        nn = normalize(item['name'])
-        if norm_title in nn or nn in norm_title:
-            return item['id']
-    base = re.split(r'\s*[:\-\u2013\u2014]\s*', norm_title)[0].strip()
-    if len(base) >= 6:
-        for item in items[:3]:
-            if base in normalize(item['name']):
-                return item['id']
-    return None
+    def canonical(value):
+        normalized = normalize(value)
+        return re.sub(r'\s+(?:for\s+)?nintendo\s+switch(?:\s+edition)?$', '', normalized)
+
+    target = canonical(norm_title)
+    matches = {item['id'] for item in items[:10] if canonical(item.get('name', '')) == target}
+    return next(iter(matches)) if len(matches) == 1 else None
 
 
 def search_steam(title):
@@ -77,16 +70,6 @@ def search_steam(title):
             if appid:
                 return appid
 
-    parts = re.split(r'\s*[:\-\u2013\u2014]\s*', title)
-    if len(parts) >= 2:
-        base = parts[0].strip()
-        if len(base) >= 4 and base != stripped:
-            items3 = _steam_search(base)
-            if items3:
-                appid = _match_items(items3, normalize(base))
-                if appid:
-                    return appid
-
     return None
 
 
@@ -99,39 +82,21 @@ def get_steamspy_tags(appid):
             tags = list(data.get('tags', {}).keys())
             return tags[:15]
     except Exception:
-        return []
+        return None
 
 
 def get_steam_review_stats(appid):
-    url = f"https://store.steampowered.com/app/{appid}/"
-    req = urllib.request.Request(url, headers={
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
-        'Accept-Language': 'en-US,en;q=0.5',
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=10) as res:
-            html = res.read().decode('utf-8')
-            match = re.search(r'data-tooltip-html="([^"]+)"', html)
-            if match:
-                tooltip = match.group(1)
-                pct_match = re.search(r'(\d+)%', tooltip)
-                count_match = re.search(r'([\d,]+) user reviews', tooltip)
-                if pct_match and count_match:
-                    pct = int(pct_match.group(1))
-                    count = int(count_match.group(1).replace(',', ''))
-                    return pct, count
-    except Exception:
-        pass
-
     try:
         api_url = f"https://store.steampowered.com/appreviews/{appid}?json=1&language=all&purchase_type=all"
         req2 = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req2, timeout=10) as res2:
             data = json.loads(res2.read())
             s = data.get('query_summary', {})
-            total = s.get('total_positive', 0) + s.get('total_negative', 0)
+            if data.get('success') != 1:
+                return None, None
+            total = int(s.get('total_positive', 0)) + int(s.get('total_negative', 0))
             if total > 0:
-                pct = int(s['total_positive'] / total * 100)
+                pct = round(int(s['total_positive']) / total * 100)
                 return pct, total
     except Exception:
         pass
@@ -139,170 +104,141 @@ def get_steam_review_stats(appid):
     return None, None
 
 
-def backfill_tags():
+def backfill_tags(base_url, apply, api_key):
     """Add SteamSpy tags to existing entries that don't have them."""
     print("Loading existing steam ratings...")
-    existing = {}
-    try:
-        req = urllib.request.Request(f"{BASE_URL}/api/steam", method='GET')
-        with urllib.request.urlopen(req) as res:
-            existing = json.loads(res.read())
-            print(f"Loaded {len(existing)} existing ratings.")
-    except Exception:
-        print("No existing ratings found.")
-        return
+    req = urllib.request.Request(f"{base_url}/api/steam", method='GET')
+    with urllib.request.urlopen(req, timeout=30) as res:
+        existing = json.loads(res.read())
+    if not isinstance(existing, dict):
+        raise RuntimeError("Steam API returned an invalid snapshot")
+    print(f"Loaded {len(existing)} existing ratings.")
 
     needs_tags = [k for k, v in existing.items() if not v.get('tags')]
     print(f"Entries needing tags: {len(needs_tags)}")
 
-    save_counter = 0
+    changed = 0
     for i, fs_id in enumerate(needs_tags):
         entry = existing[fs_id]
         tags = get_steamspy_tags(entry['steam_id'])
-        entry['tags'] = tags
-        save_counter += 1
+        if tags is not None:
+            entry['tags'] = tags
+            entry['tags_updated_at'] = datetime.now(timezone.utc).isoformat()
+            changed += 1
         tag_str = f" {tags[:3]}" if tags else " []"
         print(f"[{i+1}/{len(needs_tags)}] {entry['matched_title']}{tag_str}")
         time.sleep(1.0)
 
-        if save_counter >= SAVE_EVERY:
-            print(f"  Saving batch...")
-            req = urllib.request.Request(
-                f"{BASE_URL}/api/steam",
-                data=json.dumps(existing).encode('utf-8'),
-                headers={'Content-Type': 'application/json', 'x-api-key': API_KEY},
-                method='PUT'
-            )
-            try:
-                urllib.request.urlopen(req)
-                save_counter = 0
-            except Exception as e:
-                print(f"  Save failed: {e}")
-
-    if save_counter > 0:
-        print("Final save...")
-        req = urllib.request.Request(
-            f"{BASE_URL}/api/steam",
-            data=json.dumps(existing).encode('utf-8'),
-            headers={'Content-Type': 'application/json', 'x-api-key': API_KEY},
-            method='PUT'
-        )
-        try:
-            urllib.request.urlopen(req)
-        except Exception as e:
-            print(f"Final save failed: {e}")
-
-    print(f"Done. Tagged {len(needs_tags)} entries.")
+    print(f"Tags refreshed: {changed}")
+    if apply and changed:
+        save_snapshot(base_url, api_key, existing)
+    else:
+        print("DRY RUN: no API writes performed." if not apply else "No changed entries to save.")
 
 
-def main():
-    if len(sys.argv) > 1 and sys.argv[1] == '--tags-only':
-        backfill_tags()
-        return
+def save_snapshot(base_url, api_key, snapshot):
+    request = urllib.request.Request(
+        f"{base_url}/api/steam",
+        data=json.dumps(snapshot).encode('utf-8'),
+        headers={'Content-Type': 'application/json', 'x-api-key': api_key},
+        method='PUT',
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.loads(response.read())
 
-    print("Loading existing steam ratings...")
-    existing = {}
-    try:
-        req = urllib.request.Request(f"{BASE_URL}/api/steam", method='GET')
-        with urllib.request.urlopen(req) as res:
-            existing = json.loads(res.read())
-            print(f"Loaded {len(existing)} existing ratings.")
-    except Exception:
-        print("No existing ratings found.")
 
-    print("Fetching Nintendo games...")
-    all_games = []
+def fetch_games():
+    all_games = {}
+    expected_total = None
     start = 0
     rows = 1000
-    while True:
-        solr_url = (
-            f"https://searching.nintendo-europe.com/es/select?"
-            f"q=*&fq=type:GAME%20AND%20system_type:nintendoswitch*"
-            f"%20AND%20price_has_discount_b:true"
-            f"%20AND%20price_sorting_f:%5B0%20TO%2014.99%5D"
-            f"%20AND%20language_availability:*english*"
-            f"%20AND%20digital_version_b:true"
-            f"&sort=popularity%20asc&start={start}&rows={rows}"
-            f"&wt=json&fl=title,title_master_s,fs_id"
-        )
-        res = urllib.request.urlopen(solr_url)
-        data = json.loads(res.read())
-        docs = data['response']['docs']
-        all_games.extend(docs)
-        total = data['response']['numFound']
-        start += rows
-        if start >= total:
-            break
-    print(f"Loaded {len(all_games)} Nintendo games.")
+    while expected_total is None or start < expected_total:
+        params = urllib.parse.urlencode({
+            'q': '*:*',
+            'fq': f'type:GAME AND {ORIGINAL_SWITCH_FILTER} AND price_has_discount_b:true AND price_discounted_f:[0 TO {MAX_DISCOUNTED_PRICE_EUR}] AND language_availability:*english* AND digital_version_b:true',
+            'sort': 'popularity asc', 'start': start, 'rows': rows, 'wt': 'json',
+            'fl': 'title,title_master_s,fs_id,system_type',
+        })
+        with urllib.request.urlopen(f"https://searching.nintendo-europe.com/es/select?{params}", timeout=45) as response:
+            data = json.loads(response.read())
+        result = data.get('response', {})
+        total, docs = result.get('numFound'), result.get('docs')
+        if type(total) is not int or not isinstance(docs, list):
+            raise RuntimeError("Nintendo Solr returned invalid pagination data")
+        if expected_total is not None and total != expected_total:
+            raise RuntimeError("Nintendo Solr result count changed during pagination")
+        expected_total = total
+        if not docs and start < total:
+            raise RuntimeError(f"Nintendo Solr pagination stopped at {start} of {total}")
+        for game in docs:
+            fs_id = str(game.get('fs_id', ''))
+            if not fs_id.isdigit() or not is_original_switch_game(game):
+                continue
+            all_games.setdefault(fs_id, game)
+        start += len(docs)
+    if len(all_games) != expected_total:
+        raise RuntimeError(f"Nintendo Solr returned {len(all_games)} distinct games; expected {expected_total}")
+    return list(all_games.values())
 
-    updates = 0
-    save_counter = 0
-    skipped = 0
-    not_found = 0
 
-    for i, game in enumerate(all_games):
-        fs_id = game['fs_id']
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Backfill Steam review snapshots (dry-run by default)")
+    parser.add_argument('--base-url', help='Explicit Nintendo Deals API target; required with --apply')
+    parser.add_argument('--apply', action='store_true', help='Save the staged snapshot; default is dry-run')
+    parser.add_argument('--tags-only', action='store_true', help='Only fill missing SteamSpy tags')
+    args = parser.parse_args(argv)
+    if args.apply and not args.base_url:
+        parser.error('--apply requires an explicit --base-url target')
+    if args.apply and not API_KEY:
+        parser.error('--apply requires RATINGS_API_KEY')
+    if not args.base_url:
+        parser.error('provide --base-url to read an explicit Nintendo Deals API target')
+    base_url = args.base_url.rstrip('/')
+
+    if args.tags_only:
+        backfill_tags(base_url, args.apply, API_KEY)
+        return
+
+    request = urllib.request.Request(f"{base_url}/api/steam", method='GET')
+    with urllib.request.urlopen(request, timeout=30) as response:
+        existing = json.loads(response.read())
+    if not isinstance(existing, dict):
+        raise RuntimeError("Steam API returned an invalid snapshot")
+    games = fetch_games()
+    updates = skipped = not_found = 0
+
+    for index, game in enumerate(games):
+        fs_id = str(game['fs_id'])
         if fs_id in existing:
             skipped += 1
             continue
-
-        title = game.get('title_master_s', game['title'])
-
+        title = game.get('title_master_s') or game.get('title')
         appid = search_steam(title)
-
         if appid:
-            pct, count = get_steam_review_stats(appid)
+            score, votes = get_steam_review_stats(appid)
             tags = get_steamspy_tags(appid)
-            if pct is not None:
+            if score is not None:
                 existing[fs_id] = {
-                    "steam_id": appid,
-                    "score_pct": pct,
-                    "votes": count,
-                    "url": f"https://store.steampowered.com/app/{appid}/",
-                    "matched_title": title,
-                    "tags": tags,
+                    'steam_id': appid,
+                    'score_pct': score,
+                    'votes': votes,
+                    'url': f"https://store.steampowered.com/app/{appid}/",
+                    'matched_title': title,
+                    'last_updated': datetime.now(timezone.utc).isoformat(),
+                    **({'tags': tags} if tags is not None else {}),
                 }
                 updates += 1
-                save_counter += 1
-                tag_str = f" tags={tags[:3]}" if tags else ""
-                print(f"[{i+1}/{len(all_games)}] {title} -> {pct}% ({count}){tag_str}")
-            else:
-                print(f"[{i+1}/{len(all_games)}] {title} -> AppID {appid} but no reviews")
-            time.sleep(2.0)
+                print(f"[{index + 1}/{len(games)}] {title} -> {score}% ({votes} reviews)")
+            time.sleep(2)
         else:
             not_found += 1
-            if i < 100 or i % 100 == 0:
-                print(f"[{i+1}/{len(all_games)}] {title} -> not on Steam")
             time.sleep(0.5)
 
-        if save_counter >= SAVE_EVERY:
-            print(f"  Saving batch... ({len(existing)} total, {updates} new)")
-            req = urllib.request.Request(
-                f"{BASE_URL}/api/steam",
-                data=json.dumps(existing).encode('utf-8'),
-                headers={'Content-Type': 'application/json', 'x-api-key': API_KEY},
-                method='PUT'
-            )
-            try:
-                urllib.request.urlopen(req)
-                save_counter = 0
-            except Exception as e:
-                print(f"  Save failed: {e}")
-
-    if save_counter > 0:
-        print(f"Final save... ({len(existing)} total)")
-        req = urllib.request.Request(
-            f"{BASE_URL}/api/steam",
-            data=json.dumps(existing).encode('utf-8'),
-            headers={'Content-Type': 'application/json', 'x-api-key': API_KEY},
-            method='PUT'
-        )
-        try:
-            urllib.request.urlopen(req)
-        except Exception as e:
-            print(f"Final save failed: {e}")
-
-    print(f"\nDone. New: {updates}, Skipped: {skipped}, Not found: {not_found}, Total stored: {len(existing)}")
+    print(f"Steam snapshot: {updates} new, {skipped} existing, {not_found} unmatched; total {len(existing)}")
+    if args.apply and updates:
+        print('Published:', save_snapshot(base_url, API_KEY, existing))
+    else:
+        print('DRY RUN: no API writes performed.' if not args.apply else 'No new entries to save.')
 
 
 if __name__ == "__main__":

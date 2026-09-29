@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getMedia, saveMedia } from '@/lib/media-storage';
+import { isMediaSnapshot } from '@/lib/snapshot-validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,15 +25,11 @@ export async function PUT(req: NextRequest) {
   }
 
   try {
-    const media = await req.json();
-    const count = Object.keys(media).length;
-
-    if (count === 0) {
-      return NextResponse.json(
-        { error: 'Refusing to save empty data — would wipe existing entries' },
-        { status: 400 },
-      );
+    const media: unknown = await req.json();
+    if (!isMediaSnapshot(media)) {
+      return NextResponse.json({ error: 'Invalid media snapshot' }, { status: 400 });
     }
+    const count = Object.keys(media).length;
 
     const existing = await getMedia();
     const existingCount = Object.keys(existing).length;

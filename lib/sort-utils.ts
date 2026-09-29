@@ -1,4 +1,4 @@
-import { GameRating, NintendoGame, RatingsMap, SteamRating } from './types';
+import { NintendoGame, RatingsMap, SteamRating } from './types';
 
 const MIN_VOTES = 10;
 export const CONFIDENT_THRESHOLD = 100;
@@ -24,7 +24,6 @@ const CORE_TAGS = new Set([
 export function computeShovelwareScore(
   game: NintendoGame,
   steam?: SteamRating,
-  igdb?: GameRating,
 ): number {
   let score = 0;
   const tags = steam?.tags ?? [];

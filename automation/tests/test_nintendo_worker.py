@@ -48,6 +48,7 @@ class WorkerRulesTests(unittest.TestCase):
         result = select_digest_games(games, curated, preferences)
 
         self.assertEqual([item["fs_id"] for item in result], ["1"])
+        self.assertNotIn("4", [item["fs_id"] for item in result])
 
     def test_price_alert_requires_price_below_threshold(self):
         games = [game("1", "Cheap", price=1.99), game("2", "At Limit", price=5.0)]

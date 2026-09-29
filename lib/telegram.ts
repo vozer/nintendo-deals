@@ -77,6 +77,13 @@ export async function telegramRequest(
     body: JSON.stringify(payload),
   });
   const data = await response.json() as Record<string, unknown>;
+  if (
+    method === 'editMessageText' &&
+    typeof data.description === 'string' &&
+    data.description.toLowerCase().includes('message is not modified')
+  ) {
+    return data;
+  }
   if (!response.ok || data.ok !== true) {
     throw new Error(`Telegram ${method} failed with HTTP ${response.status}`);
   }

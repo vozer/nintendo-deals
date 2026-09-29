@@ -83,6 +83,8 @@ export interface SteamRating {
   url: string;
   matched_title: string;
   tags?: string[];
+  last_updated?: string;
+  tags_updated_at?: string;
 }
 
 export type SteamRatingsMap = Record<string, SteamRating>;
@@ -92,11 +94,20 @@ export interface CuratedEntry {
   review: string;
   source_url: string;
   source?: 'nintendolife' | 'ntdeals';
+  source_reference?: string;
+  source_platform?: string;
+  source_price_eur?: number;
+  refreshed_at?: string;
+  run_id?: string;
   rank?: number;
   metacritic_score?: number;
-  deal_rating?: string;
   discount_pct?: number;
   days_remaining?: number;
 }
 
 export type CuratedMap = Record<string, CuratedEntry>;
+
+export interface CuratedSources {
+  nintendolife: CuratedMap;
+  ntdeals: CuratedMap;
+}

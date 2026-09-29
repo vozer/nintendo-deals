@@ -1,5 +1,6 @@
-import { put, get as blobGet } from '@vercel/blob';
+import { put } from '@vercel/blob';
 import { SteamRatingsMap } from './types';
+import { readPrivateJsonMap } from './blob-json';
 
 const STEAM_KEY = 'steam_ratings.json';
 
@@ -8,15 +9,7 @@ function getToken(): string | undefined {
 }
 
 export async function getSteamRatings(): Promise<SteamRatingsMap> {
-  try {
-    const token = getToken();
-    const result = await blobGet(STEAM_KEY, { access: 'private', token });
-    if (!result || result.statusCode !== 200) return {};
-    const text = await new Response(result.stream).text();
-    return JSON.parse(text) as SteamRatingsMap;
-  } catch {
-    return {};
-  }
+  return readPrivateJsonMap<SteamRatingsMap>(STEAM_KEY, getToken());
 }
 
 export async function saveSteamRatings(ratings: SteamRatingsMap): Promise<void> {

@@ -1,5 +1,6 @@
-import { put, get as blobGet } from '@vercel/blob';
+import { put } from '@vercel/blob';
 import { RatingsMap } from './types';
+import { readPrivateJsonMap } from './blob-json';
 
 const RATINGS_KEY = 'ratings.json';
 
@@ -8,15 +9,7 @@ function getToken(): string | undefined {
 }
 
 export async function getRatings(): Promise<RatingsMap> {
-  try {
-    const token = getToken();
-    const result = await blobGet(RATINGS_KEY, { access: 'private', token });
-    if (!result || result.statusCode !== 200) return {};
-    const text = await new Response(result.stream).text();
-    return JSON.parse(text) as RatingsMap;
-  } catch {
-    return {};
-  }
+  return readPrivateJsonMap<RatingsMap>(RATINGS_KEY, getToken());
 }
 
 export async function saveRatings(ratings: RatingsMap): Promise<void> {

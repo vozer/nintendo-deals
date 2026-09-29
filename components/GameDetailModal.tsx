@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
 import { NintendoGame, GameRating, GameMedia, CuratedEntry, SteamRating } from '@/lib/types';
 
 interface GameDetailModalProps {
@@ -8,43 +9,57 @@ interface GameDetailModalProps {
   rating?: GameRating;
   steam?: SteamRating;
   media?: GameMedia;
-  curatedEntry?: CuratedEntry;
+  curatedEntries?: CuratedEntry[];
   onClose: () => void;
 }
 
-export default function GameDetailModal({ game, rating, steam, media, curatedEntry, onClose }: GameDetailModalProps) {
+export default function GameDetailModal({ game, rating, steam, media, curatedEntries = [], onClose }: GameDetailModalProps) {
   const [activeScreenshot, setActiveScreenshot] = useState(0);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
   const screenshots = media?.screenshots ?? [];
   const youtubeVideo = media?.videos?.find((v) => v.type === 'youtube');
   const [showVideo, setShowVideo] = useState(!!youtubeVideo);
   const igdbUrl = media?.igdb_url;
   const steamUrl = steam?.url;
   const nintendoUrl = `https://www.nintendo.com${game.url}`;
+  const coverImage = game.image_url_h2x1_s || game.image_url_sq_s;
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
       if (e.key === 'ArrowRight' && !showVideo)
         setActiveScreenshot((i) => Math.min(i + 1, screenshots.length - 1));
       if (e.key === 'ArrowLeft' && !showVideo)
         setActiveScreenshot((i) => Math.max(i - 1, 0));
     },
-    [onClose, screenshots.length, showVideo],
+    [screenshots.length, showVideo],
   );
 
   useEffect(() => {
+    const dialog = dialogRef.current;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    previousFocusRef.current = previousFocus;
+    dialog?.showModal();
+    closeButtonRef.current?.focus();
     document.addEventListener('keydown', handleKeyDown);
+    const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = '';
+      if (dialog?.open) dialog.close();
+      document.body.style.overflow = previousOverflow;
+      previousFocusRef.current?.focus();
     };
   }, [handleKeyDown]);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
-      onClick={onClose}
+    <dialog
+      ref={dialogRef}
+      aria-labelledby="game-detail-title"
+      className="fixed inset-0 z-50 m-0 flex h-screen w-screen max-h-none max-w-none items-center justify-center border-0 bg-black/70 p-4 backdrop-blur-sm"
+      onClick={(event) => { if (event.target === dialogRef.current) onClose(); }}
+      onCancel={(event) => { event.preventDefault(); onClose(); }}
     >
       <div
         className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
@@ -62,15 +77,20 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
             />
           ) : screenshots.length > 0 ? (
             <>
-              <img
+              <Image
                 src={screenshots[activeScreenshot]}
                 alt={`${game.title} screenshot ${activeScreenshot + 1}`}
+                fill
+                sizes="(max-width: 768px) 100vw, 896px"
+                unoptimized
                 className="w-full h-full object-contain"
               />
 
               {screenshots.length > 1 && (
                 <>
                   <button
+                    type="button"
+                    aria-label="Previous screenshot"
                     onClick={() => setActiveScreenshot((i) => Math.max(i - 1, 0))}
                     className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white w-10 h-10 rounded-full flex items-center justify-center transition-colors disabled:opacity-30"
                     disabled={activeScreenshot === 0}
@@ -78,6 +98,8 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
                     ‹
                   </button>
                   <button
+                    type="button"
+                    aria-label="Next screenshot"
                     onClick={() => setActiveScreenshot((i) => Math.min(i + 1, screenshots.length - 1))}
                     className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white w-10 h-10 rounded-full flex items-center justify-center transition-colors disabled:opacity-30"
                     disabled={activeScreenshot === screenshots.length - 1}
@@ -88,6 +110,8 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
                     {screenshots.map((_, idx) => (
                       <button
                         key={idx}
+                        type="button"
+                        aria-label={`Show screenshot ${idx + 1} of ${game.title}`}
                         onClick={() => setActiveScreenshot(idx)}
                         className={`w-2 h-2 rounded-full transition-colors ${
                           idx === activeScreenshot ? 'bg-white' : 'bg-white/40 hover:bg-white/70'
@@ -99,15 +123,21 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
               )}
             </>
           ) : (
-            <img
-              src={game.image_url_h2x1_s || game.image_url_sq_s}
+            coverImage && <Image
+              src={coverImage}
               alt={game.title}
+              fill
+              sizes="(max-width: 768px) 100vw, 896px"
+              unoptimized
               className="w-full h-full object-cover"
             />
           )}
 
           {/* Close button */}
           <button
+            ref={closeButtonRef}
+            type="button"
+            aria-label="Close game details"
             onClick={onClose}
             className="absolute top-3 left-3 bg-black/60 hover:bg-black/80 text-white w-8 h-8 rounded-full flex items-center justify-center transition-colors"
           >
@@ -119,6 +149,7 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
         {youtubeVideo && screenshots.length > 0 && (
           <div className="flex bg-gray-100 border-b border-gray-200">
             <button
+              type="button"
               onClick={() => setShowVideo(true)}
               className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors ${
                 showVideo ? 'bg-white text-[#E60012] border-b-2 border-[#E60012]' : 'text-gray-500 hover:text-gray-700'
@@ -128,6 +159,7 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
               Trailer
             </button>
             <button
+              type="button"
               onClick={() => setShowVideo(false)}
               className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors ${
                 !showVideo ? 'bg-white text-[#E60012] border-b-2 border-[#E60012]' : 'text-gray-500 hover:text-gray-700'
@@ -144,12 +176,14 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
             {screenshots.map((url, idx) => (
               <button
                 key={idx}
+                type="button"
+                aria-label={`Show screenshot ${idx + 1} of ${game.title}`}
                 onClick={() => setActiveScreenshot(idx)}
-                className={`shrink-0 w-20 h-12 rounded overflow-hidden border-2 transition-colors ${
+                className={`relative shrink-0 w-20 h-12 rounded overflow-hidden border-2 transition-colors ${
                   idx === activeScreenshot ? 'border-[#E60012]' : 'border-transparent hover:border-gray-300'
                 }`}
               >
-                <img src={url} alt="" className="w-full h-full object-cover" loading="lazy" />
+                <Image src={url} alt="" fill sizes="80px" unoptimized className="w-full h-full object-cover" />
               </button>
             ))}
           </div>
@@ -159,7 +193,7 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
         <div className="p-5 space-y-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-xl font-bold text-gray-900">{game.title}</h2>
+              <h2 id="game-detail-title" className="text-xl font-bold text-gray-900">{game.title}</h2>
               <p className="text-sm text-gray-500 mt-0.5">{game.publisher}</p>
             </div>
             <div className="text-right shrink-0">
@@ -216,17 +250,17 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
             </div>
           )}
 
-          {curatedEntry && (
+          {curatedEntries.map((curatedEntry) => (
             <div className={`border rounded-xl p-4 space-y-2 ${
               curatedEntry.source === 'ntdeals'
                 ? 'bg-blue-50 border-blue-200'
                 : 'bg-yellow-50 border-yellow-200'
-            }`}>
+            }`} key={curatedEntry.source}>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className={`text-sm font-bold ${
                   curatedEntry.source === 'ntdeals' ? 'text-blue-800' : 'text-yellow-800'
                 }`}>
-                  {curatedEntry.source === 'ntdeals' ? 'NT Deals' : 'NintendoLife Review'}
+                  {curatedEntry.source === 'ntdeals' ? 'NT Deals' : 'Nintendo Life Selects'}
                 </span>
                 {curatedEntry.rank && (
                   <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${
@@ -242,16 +276,18 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
                     Metacritic {curatedEntry.metacritic_score}
                   </span>
                 )}
-                {curatedEntry.deal_rating && (
-                  <span className="text-xs font-semibold bg-purple-200 text-purple-800 px-1.5 py-0.5 rounded">
-                    {curatedEntry.deal_rating}
-                  </span>
-                )}
               </div>
               {curatedEntry.review && (
                 <p className={`text-sm leading-relaxed italic ${
                   curatedEntry.source === 'ntdeals' ? 'text-blue-900' : 'text-yellow-900'
                 }`}>&ldquo;{curatedEntry.review}&rdquo;</p>
+              )}
+              {(curatedEntry.source_price_eur != null || curatedEntry.discount_pct != null || curatedEntry.days_remaining != null) && (
+                <p className="text-xs font-medium text-gray-700">
+                  {curatedEntry.source_price_eur != null && `${curatedEntry.source === 'ntdeals' ? 'NT Deals' : 'Nintendo Life'} price: ${curatedEntry.source_price_eur.toFixed(2)}€`}
+                  {curatedEntry.discount_pct != null && ` · ${curatedEntry.discount_pct}% off`}
+                  {curatedEntry.days_remaining != null && ` · ${curatedEntry.days_remaining} days left`}
+                </p>
               )}
               <a
                 href={curatedEntry.source_url}
@@ -263,11 +299,11 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
                     : 'text-yellow-700 hover:text-yellow-900'
                 }`}
               >
-                {curatedEntry.source === 'ntdeals' ? 'View on NT Deals' : 'Read full review on NintendoLife'}
+                {curatedEntry.source === 'ntdeals' ? 'View on NT Deals' : 'View Nintendo Life Selects'}
                 <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
               </a>
             </div>
-          )}
+          ))}
 
           {game.excerpt && (
             <p className="text-sm text-gray-600 leading-relaxed">{game.excerpt}</p>
@@ -320,6 +356,6 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
           </div>
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }

@@ -1,177 +1,131 @@
-import urllib.request
-import urllib.parse
+import argparse
+from datetime import datetime, timezone
 import json
-import re
 import os
-import unicodedata
+import urllib.parse
+import urllib.request
 import time
+import uuid
+from urllib.parse import urljoin
 
-API_KEY = os.environ.get('RATINGS_API_KEY', '')
-BASE_URL = "https://nintendo-deals.vercel.app"
+from automation.curated_sources import match_exact_catalog_title, parse_nintendolife_selects
+from automation.content_policy import ORIGINAL_SWITCH_FILTER
+
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
 }
 
-SOURCES = [
-    "https://www.nintendolife.com/guides/best-nintendo-switch-games",
-    "https://www.nintendolife.com/guides/the-best-nintendo-switch-games-2026",
-]
-
-SOLR_BASE = (
-    "https://searching.nintendo-europe.com/es/select?"
-    "fq=type:GAME%20AND%20system_type:nintendoswitch*"
-    "&rows=5&wt=json&fl=fs_id,title,title_master_s"
-)
-
-
-def normalize(title):
-    title = str(title).lower()
-    title = unicodedata.normalize('NFKD', title)
-    title = title.encode('ascii', 'ignore').decode('ascii')
-    title = re.sub(r'[^\w\s]', '', title)
-    title = re.sub(r'\s+', ' ', title)
-    return title.strip()
+SELECTS_URL = "https://www.nintendolife.com/eshop/eshop-selects"
+SOLR_URL = "https://searching.nintendo-europe.com/es/select"
 
 
 def fetch_html(url):
     print(f"Scraping {url}...")
     req = urllib.request.Request(url, headers=HEADERS)
-    try:
-        with urllib.request.urlopen(req, timeout=15) as res:
-            return res.read().decode('utf-8')
-    except Exception as e:
-        print(f"  Failed: {e}")
-        return ""
+    with urllib.request.urlopen(req, timeout=25) as res:
+        return res.read().decode('utf-8')
 
 
 def extract_entries(html):
-    entries = []
-    item_pattern = (
-        r'<div class="list-item"><h3 class="heading"[^>]*>\s*(\d+)\.\s*'
-        r'<a[^>]*>(.*?)</a></h3>(.*?)(?=<div class="list-item">|</div>\s*<h2|$)'
-    )
-    matches = re.findall(item_pattern, html, re.DOTALL)
-    for rank_str, raw_title, content in matches:
-        title = re.sub(r'\s*\([^)]*\)\s*$', '', raw_title).strip()
-        title = re.sub(r'<[^>]+>', '', title).strip()
-
-        paragraphs = re.findall(r'<p>(.*?)</p>', content, re.DOTALL)
-        review_parts = []
-        for p in paragraphs[:2]:
-            clean = re.sub(r'<[^>]+>', '', p).strip()
-            if clean:
-                review_parts.append(clean)
-        review = ' '.join(review_parts)
-
-        entries.append({
-            'rank': int(rank_str),
-            'title': title,
-            'review': review,
-        })
-    return entries
+    return parse_nintendolife_selects(html)
 
 
 def search_solr(title):
-    safe_title = urllib.parse.quote(title, safe='')
-    url = f"{SOLR_BASE}&q={safe_title}"
-    try:
-        res = urllib.request.urlopen(url, timeout=10)
-        data = json.loads(res.read())
-        docs = data['response']['docs']
-        if not docs:
-            return None
-
-        norm_target = normalize(title)
-        best_match = None
-        best_score = 0
-
-        for doc in docs:
-            for field in ['title_master_s', 'title']:
-                val = doc.get(field, '')
-                norm_val = normalize(val)
-                if norm_val == norm_target:
-                    return doc['fs_id']
-                # Partial match scoring
-                if norm_target in norm_val or norm_val in norm_target:
-                    score = min(len(norm_target), len(norm_val)) / max(len(norm_target), len(norm_val))
-                    if score > best_score:
-                        best_score = score
-                        best_match = doc['fs_id']
-
-        if best_score >= 0.7:
-            return best_match
-
-    except Exception as e:
-        print(f"    Solr search failed for '{title}': {e}")
-    return None
+    params = urllib.parse.urlencode({
+        "q": title,
+        "defType": "edismax",
+        "qf": "title^3 title_master_s^3 title_extras_txt^2",
+        "fq": f"type:GAME AND {ORIGINAL_SWITCH_FILTER}",
+        "rows": "100",
+        "wt": "json",
+        "fl": "fs_id,title,title_master_s,system_type",
+    })
+    with urllib.request.urlopen(f"{SOLR_URL}?{params}", timeout=20) as response:
+        data = json.loads(response.read())
+    docs = data.get("response", {}).get("docs", [])
+    return match_exact_catalog_title(title, docs) if isinstance(docs, list) else None
 
 
-def main():
-    all_entries = {}
-    seen_titles = set()
+def publish_entries(base_url, api_key, entries):
+    req = urllib.request.Request(
+        f"{base_url.rstrip('/')}/api/curated",
+        data=json.dumps({"source": "nintendolife", "entries": entries}).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-api-key": api_key},
+        method="PUT",
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        return json.loads(response.read())
 
-    for source_url in SOURCES:
-        html = fetch_html(source_url)
-        if not html:
-            continue
 
-        entries = extract_entries(html)
-        print(f"  Found {len(entries)} entries.")
+def write_redacted_summary(source_count, match_count, duration_seconds):
+    path = os.environ.get("NINTENDO_DEALS_CURATION_SUMMARY_PATH", "").strip()
+    if path:
+        summary = {
+            "nintendolife_source_entries": source_count,
+            "nintendolife_matches": match_count,
+            "nintendolife_rejections": max(0, source_count - match_count),
+            "nintendolife_duration_seconds": duration_seconds,
+        }
+        with open(path, "w", encoding="utf-8") as output:
+            json.dump(summary, output, sort_keys=True)
 
-        for entry in entries:
-            norm = normalize(entry['title'])
-            if norm in seen_titles:
-                continue
-            seen_titles.add(norm)
 
-            fs_id = search_solr(entry['title'])
-            if fs_id:
-                if fs_id not in all_entries or entry['rank'] < all_entries[fs_id].get('rank', 999):
-                    all_entries[fs_id] = {
-                        'title': entry['title'],
-                        'review': entry['review'][:500],
-                        'source_url': source_url,
-                        'source': 'nintendolife',
-                        'rank': entry['rank'],
-                    }
-                print(f"  [{entry['rank']}] {entry['title']} -> fs_id={fs_id}")
-            else:
-                print(f"  [{entry['rank']}] {entry['title']} -> NOT FOUND in eShop")
+def build_entries(items, run_id, refreshed_at):
+    entries = {}
+    for item in items:
+        fs_id = search_solr(item["title"])
+        if fs_id:
+            current = entries.get(fs_id)
+            if not current or item["rank"] < current["rank"]:
+                entries[fs_id] = {
+                    "title": item["title"],
+                    "review": "Hand-picked by the Nintendo Life team.",
+                    "source_url": urljoin("https://www.nintendolife.com/", item["source_reference"]),
+                    "source_reference": item["source_reference"],
+                    "source_platform": item["platform"],
+                    "source_price_eur": item["source_price_eur"],
+                    "source": "nintendolife",
+                    "rank": item["rank"],
+                    "refreshed_at": refreshed_at,
+                    "run_id": run_id,
+                }
+                print(f"  [{item['rank']}] {item['title']} -> fs_id={fs_id}")
+        else:
+            print(f"  [{item['rank']}] {item['title']} -> no exact original-Switch match")
+        time.sleep(0.2)
+    return entries
 
-            time.sleep(0.3)
 
-    print(f"\nTotal matched curated games: {len(all_entries)}")
+def main(argv=None):
+    started_at = time.monotonic()
+    parser = argparse.ArgumentParser(description="Refresh Nintendo Life eShop Selects curation")
+    parser.add_argument("--base-url", help="Explicit Nintendo Deals API target; required with --apply")
+    parser.add_argument("--apply", action="store_true", help="Publish the source snapshot; default is dry-run")
+    args = parser.parse_args(argv)
+    if args.apply and not args.base_url:
+        parser.error("--apply requires an explicit --base-url target")
+    api_key = os.environ.get("RATINGS_API_KEY", "").strip()
+    if args.apply and not api_key:
+        parser.error("--apply requires RATINGS_API_KEY")
 
-    if all_entries:
-        print("Fetching existing curated data...")
-        try:
-            fetch_req = urllib.request.Request(f"{BASE_URL}/api/curated")
-            with urllib.request.urlopen(fetch_req, timeout=15) as res:
-                existing = json.loads(res.read())
-        except Exception as e:
-            print(f"  Failed to fetch existing: {e}")
-            existing = {}
+    items = extract_entries(fetch_html(SELECTS_URL))
+    if not items:
+        raise RuntimeError("Nintendo Life eShop Selects returned no valid original-Switch entries")
+    run_id = uuid.uuid4().hex[:12]
+    refreshed_at = datetime.now(timezone.utc).isoformat()
+    entries = build_entries(items, run_id, refreshed_at)
+    if not entries:
+        raise RuntimeError("No exact original-Switch matches; refusing to publish an empty source snapshot")
 
-        non_nintendolife = {k: v for k, v in existing.items() if v.get('source') != 'nintendolife'}
-        merged = {**non_nintendolife, **all_entries}
-        print(f"Merging: {len(all_entries)} NintendoLife + {len(non_nintendolife)} other = {len(merged)} total")
+    write_redacted_summary(len(items), len(entries), int(time.monotonic() - started_at))
+    print(f"Nintendo Life Selects: {len(items)} source entries, {len(entries)} exact matches, run {run_id}")
+    if not args.apply:
+        print("DRY RUN: no API writes performed. Pass --apply and an explicit --base-url to publish.")
+        return entries
 
-        print("Saving to API...")
-        req = urllib.request.Request(
-            f"{BASE_URL}/api/curated",
-            data=json.dumps(merged).encode('utf-8'),
-            headers={'Content-Type': 'application/json', 'x-api-key': API_KEY},
-            method='PUT'
-        )
-        try:
-            with urllib.request.urlopen(req) as res:
-                result = json.loads(res.read())
-                print(f"Saved: {result}")
-        except Exception as e:
-            print(f"Save failed: {e}")
-    else:
-        print("No matches found — nothing to save.")
+    print("Published source snapshot:", publish_entries(args.base_url, api_key, entries))
+    return entries
 
 
 if __name__ == "__main__":

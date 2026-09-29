@@ -1,13 +1,12 @@
 import DealsClient from '@/components/DealsClient';
 
 type HomePageProps = {
-  searchParams?: {
-    game?: string | string[];
-  };
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-export default function HomePage({ searchParams }: HomePageProps) {
-  const gameParam = searchParams?.game;
+export default async function HomePage({ searchParams }: HomePageProps) {
+  const params = await searchParams;
+  const gameParam = params.game;
   const initialGameId = typeof gameParam === 'string'
     ? gameParam
     : Array.isArray(gameParam)

@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { NintendoGame, Preferences, GameRating, GameMedia, SteamRating } from '@/lib/types';
 import { bayesianScore } from '@/lib/sort-utils';
 
@@ -99,11 +100,13 @@ export default function GameCard({ game, preferences, rating, steam, media, cura
         onClick={() => onOpenDetail?.(game)}
       >
         {imageUrl && (
-          <img
+          <Image
             src={imageUrl}
             alt={game.title}
+            fill
+            sizes="(max-width: 640px) 100vw, 33vw"
+            unoptimized
             className={`w-full h-full object-cover group-hover:brightness-90 transition-all ${isOnSale ? '' : 'grayscale-[30%] opacity-80'}`}
-            loading="lazy"
           />
         )}
         {isOnSale && game.price_discount_percentage_f ? (

@@ -7,15 +7,10 @@ import unicodedata
 from typing import Any
 from urllib.parse import quote
 
+from automation.content_policy import MAX_DISCOUNTED_PRICE_EUR, is_blocked_title
 
 THRESHOLDS = (2, 5, 10)
 GAME_ID_RE = re.compile(r"^\d+$")
-BLOCKED_TITLE_RE = re.compile(
-    r"\b(hentai|pretty\s+girls|mahjong|solitaire|jigsaw\s+puzzle|dating|"
-    r"date\s+(boys?|girls?|sim|everything|z\b)|blind\s+dates?|boyfriend|"
-    r"girlfriend|otome|waifu|harem)\b",
-    re.IGNORECASE,
-)
 
 
 def normalize_title(value: Any) -> str:
@@ -45,9 +40,9 @@ def _price(game: dict[str, Any]) -> float | None:
         return None
 
 
-def _is_active_deal(game: dict[str, Any]) -> bool:
+def is_active_deal(game: dict[str, Any]) -> bool:
     price = _price(game)
-    if price is None or price > 14.99:
+    if price is None or price > MAX_DISCOUNTED_PRICE_EUR:
         return False
     if game.get("price_has_discount_b") is False:
         return False
@@ -55,7 +50,7 @@ def _is_active_deal(game: dict[str, Any]) -> bool:
 
 
 def _is_blocked(game: dict[str, Any]) -> bool:
-    return bool(BLOCKED_TITLE_RE.search(str(game.get("title", ""))))
+    return is_blocked_title(game.get("title", ""))
 
 
 def select_digest_games(
@@ -73,7 +68,7 @@ def select_digest_games(
         entry = curated.get(fs_id)
         if not fs_id or not entry or entry.get("source") != "nintendolife":
             continue
-        if fs_id in hidden or fs_id in watched or _is_blocked(game) or not _is_active_deal(game):
+        if fs_id in hidden or fs_id in watched or _is_blocked(game) or not is_active_deal(game):
             continue
         selected.append(game)
 

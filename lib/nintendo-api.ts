@@ -1,23 +1,30 @@
 import { NintendoGame, GamesResponse, SortOption } from './types';
+import contentPolicy from '@/shared/content-policy.json';
 
 const NINTENDO_SOLR_URL = 'https://searching.nintendo-europe.com/es/select';
+const ORIGINAL_SWITCH_FILTER = `system_type:${contentPolicy.switchSystemPrefix}* AND -system_type:${contentPolicy.excludedSystemType}`;
 
 const DEALS_FILTER = [
   'type:GAME',
-  'system_type:nintendoswitch*',
+  ORIGINAL_SWITCH_FILTER,
   'price_has_discount_b:true',
-  'price_sorting_f:[0 TO 14.99]',
+  `price_discounted_f:[0 TO ${contentPolicy.maxDiscountedPriceEur}]`,
   'language_availability:*english*',
 ].join(' AND ');
 
 const SEARCH_FILTER = [
   'type:GAME',
-  'system_type:nintendoswitch*',
+  ORIGINAL_SWITCH_FILTER,
   'language_availability:*english*',
 ].join(' AND ');
 
 function escapeSolr(query: string): string {
   return query.replace(/([+\-&|!(){}[\]^"~*?:\\/])/g, '\\$1');
+}
+
+function isWithinDealPriceCap(game: NintendoGame): boolean {
+  const price = Number(game.price_discounted_f);
+  return Number.isFinite(price) && price >= 0 && price <= contentPolicy.maxDiscountedPriceEur;
 }
 
 const SORT_MAP: Record<SortOption, string> = {
@@ -44,7 +51,7 @@ export async function fetchDeals(options: {
   const isSearch = !!search?.trim();
 
   if (isSearch) {
-    return fetchSearchResults(search!.trim(), rows);
+    return fetchSearchResults(search!.trim(), start, rows);
   }
 
   let fq = DEALS_FILTER;
@@ -64,7 +71,8 @@ export async function fetchDeals(options: {
     const res = await fetch(`${NINTENDO_SOLR_URL}?${params}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`Nintendo API error: ${res.status}`);
     const data = await res.json();
-    return { games: data.response.docs as NintendoGame[], total: data.response.numFound as number };
+    const games = (data.response.docs as NintendoGame[]).filter(isWithinDealPriceCap);
+    return { games, total: data.response.numFound as number };
   }
 
   const allGames: NintendoGame[] = [];
@@ -82,7 +90,7 @@ export async function fetchDeals(options: {
     const data = await res.json();
     total = data.response.numFound as number;
     const docs = data.response.docs as NintendoGame[];
-    allGames.push(...docs);
+    allGames.push(...docs.filter(isWithinDealPriceCap));
     if (docs.length < batch || allGames.length >= total) break;
     offset += docs.length;
   }
@@ -96,7 +104,7 @@ export async function fetchGameById(fsId: string): Promise<NintendoGame | null> 
 
   const fq = [
     'type:GAME',
-    'system_type:nintendoswitch*',
+    ORIGINAL_SWITCH_FILTER,
     `fs_id:${normalizedId}`,
   ].join(' AND ');
 
@@ -115,7 +123,7 @@ export async function fetchGameById(fsId: string): Promise<NintendoGame | null> 
   return doc ?? null;
 }
 
-async function fetchSearchResults(query: string, maxRows: number): Promise<GamesResponse> {
+async function fetchSearchResults(query: string, start: number, maxRows: number): Promise<GamesResponse> {
   const escaped = escapeSolr(query);
   const rows = Math.min(maxRows, 100);
 
@@ -125,6 +133,7 @@ async function fetchSearchResults(query: string, maxRows: number): Promise<Games
     qf: 'title^3 title_extras_txt^2 title_master_s^3',
     pf: 'title^10 title_extras_txt^5 title_master_s^10',
     fq: SEARCH_FILTER,
+    start: String(start),
     rows: String(rows),
     wt: 'json',
   });

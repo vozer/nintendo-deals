@@ -8,16 +8,20 @@ erDiagram
     GAME ||--o| STEAM_RATING : "has"
     GAME ||--o| GAME_MEDIA : "has"
     GAME_MEDIA ||--o{ MEDIA_ASSET : "contains"
-    GAME ||--o| CURATED_ENTRY : "has"
+    GAME ||--o{ CURATED_ENTRY : "has source signals"
     PREFERENCE_PROFILE ||--o{ HIDDEN_GAME : "hides"
     PREFERENCE_PROFILE ||--o{ WATCHED_GAME : "watches"
     PREFERENCE_PROFILE ||--o{ THINKING_GAME : "considers"
     GAME ||--o{ HIDDEN_GAME : "is referenced by"
     GAME ||--o{ WATCHED_GAME : "is referenced by"
     GAME ||--o{ THINKING_GAME : "is referenced by"
+    PREFERENCE_PROFILE ||--o{ TELEGRAM_UPDATE : "deduplicates"
+    PREFERENCE_PROFILE ||--o{ TELEGRAM_DELIVERY : "claims"
 ```
 
 This is a normalized logical view of the current Nintendo catalog responses and JSON documents; physical persistence is denormalized into provider maps keyed by Nintendo game identifier.
+
+Telegram replay and delivery records are private operational metadata stored beside preferences. They are not included in the public preference API response.
 
 ### GAME
 
@@ -80,6 +84,27 @@ Records that a profile is considering a game without setting a price alert.
 
 **Constraints:** Each profile and game pair must be unique.
 
+### TELEGRAM_UPDATE
+
+Tracks completed inbound callbacks so Telegram retries cannot apply the same action twice.
+
+| Attribute | Description | Data Type | Length/Precision | Validation Rules |
+|---|---|---|---|---|
+| profile_id | Owning preference profile | String | 50 | Not Null, Foreign Key (PREFERENCE_PROFILE.id) |
+| update_id | Telegram callback identifier | String | 200 | Not Null, Unique |
+
+### TELEGRAM_DELIVERY
+
+Claims one outbound alert or digest item for one Madrid calendar date before sending it.
+
+| Attribute | Description | Data Type | Length/Precision | Validation Rules |
+|---|---|---|---|---|
+| profile_id | Owning preference profile | String | 50 | Not Null, Foreign Key (PREFERENCE_PROFILE.id) |
+| delivery_date | Europe/Madrid calendar date | Date | - | Not Null |
+| delivery_key | Stable message identity for that date | String | 120 | Not Null |
+
+**Constraints:** Each profile, date, and delivery key tuple must be unique.
+
 ### GAME_RATING
 
 Stores the IGDB rating match for one Nintendo game.
@@ -137,7 +162,7 @@ Represents one screenshot or video retained in a game's media collection.
 
 ### CURATED_ENTRY
 
-Stores the single current editorial or deal-pick signal retained for a Nintendo game.
+Stores a source-specific editorial or deal-pick signal; one game can retain both Nintendo Life and NT Deals signals.
 
 | Attribute | Description | Data Type | Length/Precision | Validation Rules |
 |---|---|---|---|---|
@@ -152,3 +177,5 @@ Stores the single current editorial or deal-pick signal retained for a Nintendo 
 | discount_percentage | Source-reported discount used only as context | Integer | 10 | Optional |
 | days_remaining | Source-reported days until offer expiry | Integer | 10 | Optional |
 | refreshed_at | Time the signal was last refreshed | DateTime | - | Optional |
+
+**Constraints:** Each game and source pair must be unique; Nintendo Life remains the primary badge when both sources select the same game.

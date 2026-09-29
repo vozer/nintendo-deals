@@ -7,16 +7,16 @@ Fallback: IGDB screenshots + YouTube videos API
 Saves to Vercel Blob via PUT /api/media.
 Designed to run as daily cron on Raspberry Pi alongside n8n ratings workflow.
 """
+import argparse
 import json, time, re, urllib.request, urllib.parse, sys, os
+
+from automation.content_policy import MAX_DISCOUNTED_PRICE_EUR, ORIGINAL_SWITCH_FILTER, is_original_switch_game
 
 TWITCH_CLIENT_ID = os.environ.get('TWITCH_CLIENT_ID', '')
 TWITCH_CLIENT_SECRET = os.environ.get('TWITCH_CLIENT_SECRET', '')
 IGDB_SCREENSHOTS_URL = "https://api.igdb.com/v4/screenshots"
 IGDB_VIDEOS_URL = "https://api.igdb.com/v4/game_videos"
 NINTENDO_BASE = "https://www.nintendo.com"
-VERCEL_API = "https://nintendo-deals.vercel.app"
-API_KEY = os.environ.get('RATINGS_API_KEY', '')
-SAVE_EVERY = 50
 BATCH_SIZE = 500
 
 
@@ -101,159 +101,136 @@ def fetch_igdb_media(igdb_id, access_token):
     return {'screenshots': screenshots, 'videos': videos, 'source': 'igdb'}
 
 
-def save_to_vercel(media_map):
+def save_to_vercel(media_map, base_url, api_key):
     payload = json.dumps(media_map).encode()
     req = urllib.request.Request(
-        f"{VERCEL_API}/api/media",
+        f"{base_url}/api/media",
         data=payload, method='PUT',
-        headers={'Content-Type': 'application/json', 'x-api-key': API_KEY}
+        headers={'Content-Type': 'application/json', 'x-api-key': api_key}
     )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        print(f"  ERROR saving: {e.code} {e.read().decode()}", flush=True)
-        return None
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read())
 
 
 def fetch_all_games():
     """Fetch all games with pagination."""
     all_games = []
+    expected_total = None
     start = 0
-    while True:
+    while expected_total is None or start < expected_total:
+        rows = BATCH_SIZE if expected_total is None else min(BATCH_SIZE, expected_total - start)
         params = urllib.parse.urlencode({
             'q': '*',
-            'fq': 'type:GAME AND system_type:nintendoswitch* AND price_has_discount_b:true AND price_sorting_f:[0 TO 14.99] AND language_availability:*english* AND digital_version_b:true',
-            'rows': str(BATCH_SIZE), 'start': str(start), 'wt': 'json', 'sort': 'popularity asc'
+            'fq': f'type:GAME AND {ORIGINAL_SWITCH_FILTER} AND price_has_discount_b:true AND price_discounted_f:[0 TO {MAX_DISCOUNTED_PRICE_EUR}] AND language_availability:*english* AND digital_version_b:true',
+            'rows': str(rows), 'start': str(start), 'wt': 'json', 'sort': 'popularity asc',
+            'fl': 'title,title_master_s,fs_id,system_type,price_discounted_f,price_has_discount_b',
         })
         req = urllib.request.Request(f"https://searching.nintendo-europe.com/es/select?{params}")
         with urllib.request.urlopen(req) as resp:
             data = json.loads(resp.read().decode('utf-8', errors='replace'))
-        docs = data['response']['docs']
-        total = data['response']['numFound']
+        result = data.get('response', {})
+        docs = result.get('docs')
+        total = result.get('numFound')
+        if type(total) is not int or not isinstance(docs, list) or len(docs) > rows:
+            raise RuntimeError("Nintendo Solr returned invalid pagination data")
+        if expected_total is not None and total != expected_total:
+            raise RuntimeError("Nintendo Solr result count changed during pagination")
+        expected_total = total
+        if not docs and start < total:
+            raise RuntimeError(f"Nintendo Solr pagination stopped at {start} of {total}")
         all_games.extend(docs)
         print(f"  Fetched {len(all_games)}/{total} games", flush=True)
-        if len(all_games) >= total:
-            break
-        start += BATCH_SIZE
-    return all_games
+        start += len(docs)
+    by_id = {str(game.get('fs_id')): game for game in all_games if str(game.get('fs_id', '')).isdigit()}
+    if len(by_id) != expected_total:
+        raise RuntimeError(f"Nintendo Solr returned {len(by_id)} distinct games; expected {expected_total}")
+    def is_active_original_switch_game(game):
+        try:
+            price = float(game['price_discounted_f'])
+        except (KeyError, TypeError, ValueError):
+            return False
+        return (
+            is_original_switch_game(game)
+            and game.get('price_has_discount_b') is not False
+            and 0 <= price <= MAX_DISCOUNTED_PRICE_EUR
+        )
+
+    return [game for game in by_id.values() if is_active_original_switch_game(game)]
 
 
-# --- Main ---
-print(f"=== Media Backfill ===", flush=True)
-print(f"Started: {time.strftime('%Y-%m-%d %H:%M:%S')}\n", flush=True)
+def read_snapshot(base_url, path):
+    request = urllib.request.Request(f"{base_url}{path}")
+    with urllib.request.urlopen(request, timeout=30) as response:
+        snapshot = json.loads(response.read())
+    if not isinstance(snapshot, dict):
+        raise RuntimeError(f"{path} returned an invalid object")
+    return snapshot
 
-# Fetch existing media
-print("Loading existing media from Blob...", flush=True)
-try:
-    req = urllib.request.Request(f"{VERCEL_API}/api/media")
-    with urllib.request.urlopen(req) as resp:
-        existing_media = json.loads(resp.read())
-except Exception:
-    existing_media = {}
-print(f"Existing: {len(existing_media)} entries\n", flush=True)
 
-# Fetch all games
-print("Fetching all Nintendo deals...", flush=True)
-games = fetch_all_games()
-print(f"Total: {len(games)} games\n", flush=True)
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Backfill Nintendo media (dry-run by default)")
+    parser.add_argument('--base-url', required=True, help='Explicit Nintendo Deals API target')
+    parser.add_argument('--apply', action='store_true', help='Publish the staged snapshot; default is dry-run')
+    args = parser.parse_args(argv)
+    base_url = args.base_url.rstrip('/')
+    api_key = os.environ.get('RATINGS_API_KEY', '').strip()
+    if args.apply and (not api_key or not TWITCH_CLIENT_ID or not TWITCH_CLIENT_SECRET):
+        parser.error('--apply requires RATINGS_API_KEY, TWITCH_CLIENT_ID, and TWITCH_CLIENT_SECRET')
 
-# Fetch ratings for IGDB IDs
-print("Fetching ratings...", flush=True)
-req = urllib.request.Request(f"{VERCEL_API}/api/ratings")
-with urllib.request.urlopen(req) as resp:
-    ratings = json.loads(resp.read())
-print(f"Ratings: {len(ratings)}\n", flush=True)
+    existing_media = read_snapshot(base_url, '/api/media')
+    ratings = read_snapshot(base_url, '/api/ratings')
+    games = fetch_all_games()
+    new_games = [game for game in games if str(game.get('fs_id')) not in existing_media]
+    print(f"Media snapshot: {len(existing_media)} existing, {len(new_games)} candidates")
+    if not args.apply or not new_games:
+        print('DRY RUN: no API writes performed.' if not args.apply else 'No missing media to save.')
+        return
 
-# Filter to games without media
-new_games = [g for g in games if g['fs_id'] not in existing_media]
-print(f"Games needing media: {len(new_games)}\n", flush=True)
+    data = urllib.parse.urlencode({
+        'client_id': TWITCH_CLIENT_ID, 'client_secret': TWITCH_CLIENT_SECRET,
+        'grant_type': 'client_credentials'
+    }).encode()
+    request = urllib.request.Request("https://id.twitch.tv/oauth2/token", data=data, method='POST')
+    with urllib.request.urlopen(request, timeout=30) as response:
+        access_token = json.loads(response.read())['access_token']
 
-if not new_games:
-    print("All games already have media. Done!", flush=True)
-    sys.exit(0)
-
-# Twitch token
-print("Getting Twitch token...", flush=True)
-data = urllib.parse.urlencode({
-    'client_id': TWITCH_CLIENT_ID, 'client_secret': TWITCH_CLIENT_SECRET,
-    'grant_type': 'client_credentials'
-}).encode()
-req = urllib.request.Request("https://id.twitch.tv/oauth2/token", data=data, method='POST')
-with urllib.request.urlopen(req) as resp:
-    access_token = json.loads(resp.read())['access_token']
-
-# Process
-media_map = dict(existing_media)
-stats = {'nintendo': 0, 'igdb': 0, 'none': 0, 'saved': 0}
-
-for i, game in enumerate(new_games):
-    fs_id = game['fs_id']
-    title = game['title']
-    page_url = game.get('url', '')
-
-    nintendo_media = fetch_nintendo_gallery(page_url)
-    if nintendo_media:
-        stats['nintendo'] += 1
+    media_map = dict(existing_media)
+    stats = {'nintendo': 0, 'igdb': 0, 'none': 0}
+    for index, game in enumerate(new_games):
+        fs_id, title = str(game['fs_id']), game['title']
+        nintendo_media = fetch_nintendo_gallery(game.get('url', ''))
         igdb_id = ratings.get(fs_id, {}).get('igdb_id')
-        youtube_videos = []
-        igdb_url = None
-        if igdb_id:
-            time.sleep(0.28)
-            igdb_data = fetch_igdb_media(igdb_id, access_token)
-            if igdb_data and igdb_data['videos']:
-                youtube_videos = igdb_data['videos']
+        igdb_data = fetch_igdb_media(igdb_id, access_token) if igdb_id else None
+        if nintendo_media:
+            stats['nintendo'] += 1
+            source = nintendo_media
+            videos = igdb_data['videos'] if igdb_data and igdb_data['videos'] else source['videos']
             matched = ratings.get(fs_id, {}).get('matched_title', '')
-            if matched:
-                igdb_url = f"https://www.igdb.com/games/{matched.lower().replace(' ', '-').replace(':', '')}"
-        media_map[fs_id] = {
-            'screenshots': nintendo_media['screenshots'],
-            'videos': youtube_videos or nintendo_media['videos'],
-            'igdb_url': igdb_url,
-            'source': 'nintendo',
-            'last_updated': time.strftime('%Y-%m-%d'),
-        }
-    else:
-        igdb_id = ratings.get(fs_id, {}).get('igdb_id')
-        if igdb_id:
-            time.sleep(0.28)
-            igdb_data = fetch_igdb_media(igdb_id, access_token)
-            if igdb_data:
-                stats['igdb'] += 1
-                matched = ratings.get(fs_id, {}).get('matched_title', '')
-                igdb_url = f"https://www.igdb.com/games/{matched.lower().replace(' ', '-').replace(':', '')}" if matched else None
-                media_map[fs_id] = {
-                    'screenshots': igdb_data['screenshots'],
-                    'videos': igdb_data['videos'],
-                    'igdb_url': igdb_url,
-                    'source': 'igdb',
-                    'last_updated': time.strftime('%Y-%m-%d'),
-                }
-            else:
-                stats['none'] += 1
+            igdb_url = f"https://www.igdb.com/games/{matched.lower().replace(' ', '-').replace(':', '')}" if matched else None
+        elif igdb_data:
+            stats['igdb'] += 1
+            source, videos = igdb_data, igdb_data['videos']
+            matched = ratings.get(fs_id, {}).get('matched_title', '')
+            igdb_url = f"https://www.igdb.com/games/{matched.lower().replace(' ', '-').replace(':', '')}" if matched else None
         else:
             stats['none'] += 1
+            continue
+        media_map[fs_id] = {
+            'screenshots': source['screenshots'],
+            'videos': videos,
+            'igdb_url': igdb_url,
+            'source': 'nintendo' if nintendo_media else 'igdb',
+            'last_updated': time.strftime('%Y-%m-%d'),
+        }
+        if (index + 1) % 10 == 0:
+            print(f"  [{index + 1}/{len(new_games)}] {title} -> {media_map[fs_id]['source']}", flush=True)
+        time.sleep(0.3)
 
-    if (i + 1) % 10 == 0:
-        m = media_map.get(fs_id)
-        src = m['source'] if m else 'NONE'
-        print(f"  [{i+1}/{len(new_games)}] {title} -> {src}", flush=True)
+    if len(media_map) == len(existing_media):
+        raise RuntimeError('No media was returned; refusing to publish an unchanged snapshot')
+    result = save_to_vercel(media_map, base_url, api_key)
+    print(f"Saved {result}; Nintendo={stats['nintendo']}, IGDB={stats['igdb']}, missing={stats['none']}")
 
-    if (i + 1) % SAVE_EVERY == 0:
-        print(f"  Incremental save ({len(media_map)} entries)...", flush=True)
-        result = save_to_vercel(media_map)
-        if result:
-            stats['saved'] += 1
-            print(f"  Saved: {result}", flush=True)
 
-    time.sleep(0.3)
-
-# Final save
-print(f"\nFinal save ({len(media_map)} entries)...", flush=True)
-result = save_to_vercel(media_map)
-print(f"Result: {result}", flush=True)
-
-print(f"\n=== Done ===", flush=True)
-print(f"Nintendo: {stats['nintendo']}, IGDB: {stats['igdb']}, None: {stats['none']}", flush=True)
-print(f"Total media entries: {len(media_map)}", flush=True)
-print(f"Finished: {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
+if __name__ == '__main__':
+    main()

@@ -32,7 +32,7 @@ function LoginPageInner() {
 
       if (res.ok) {
         const nextPath = searchParams.get('next') || '/';
-        const target = nextPath.startsWith('/') ? nextPath : '/';
+        const target = nextPath.startsWith('/') && !nextPath.startsWith('//') ? nextPath : '/';
         router.push(target);
         router.refresh();
       } else {

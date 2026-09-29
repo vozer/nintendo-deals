@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSteamRatings, saveSteamRatings } from '@/lib/steam-storage';
+import { isSteamSnapshot } from '@/lib/snapshot-validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,15 +25,11 @@ export async function PUT(req: NextRequest) {
   }
 
   try {
-    const ratings = await req.json();
-    const count = Object.keys(ratings).length;
-
-    if (count === 0) {
-      return NextResponse.json(
-        { error: 'Refusing to save empty data — would wipe existing entries' },
-        { status: 400 },
-      );
+    const ratings: unknown = await req.json();
+    if (!isSteamSnapshot(ratings)) {
+      return NextResponse.json({ error: 'Invalid Steam snapshot' }, { status: 400 });
     }
+    const count = Object.keys(ratings).length;
 
     const existing = await getSteamRatings();
     const existingCount = Object.keys(existing).length;

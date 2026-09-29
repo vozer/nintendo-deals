@@ -9,7 +9,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "check:aiup": "bash scripts/check-aiup-docs.sh"
   },
   "dependencies": {
     "@vercel/blob": "2.8.0",

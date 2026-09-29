@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { verifySessionToken } from '@/lib/session';
 
-export function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (
@@ -17,7 +18,7 @@ export function middleware(request: NextRequest) {
   }
 
   const authCookie = request.cookies.get('nintendo-deals-auth')?.value;
-  if (!authCookie || authCookie !== process.env.ACCESS_PASSWORD) {
+  if (!await verifySessionToken(authCookie, process.env.ACCESS_PASSWORD)) {
     const loginUrl = new URL('/login', request.url);
     const nextPath = `${pathname}${request.nextUrl.search}`;
     loginUrl.searchParams.set('next', nextPath);

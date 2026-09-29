@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { verifySessionToken } from './session';
 
 const AUTH_COOKIE_NAME = 'nintendo-deals-auth';
 
@@ -16,12 +17,12 @@ export function hasValidApiKey(req: NextRequest): boolean {
   return Boolean(expected && provided && provided === expected);
 }
 
-export function hasValidSessionCookie(req: NextRequest): boolean {
+export async function hasValidSessionCookie(req: NextRequest): Promise<boolean> {
   const provided = req.cookies.get(AUTH_COOKIE_NAME)?.value;
   const expected = getExpectedPassword();
-  return Boolean(expected && provided && provided === expected);
+  return verifySessionToken(provided, expected);
 }
 
-export function isAuthorizedRequest(req: NextRequest): boolean {
-  return hasValidApiKey(req) || hasValidSessionCookie(req);
+export async function isAuthorizedRequest(req: NextRequest): Promise<boolean> {
+  return hasValidApiKey(req) || await hasValidSessionCookie(req);
 }

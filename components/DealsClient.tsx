@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { NintendoGame, Preferences, SortOption, RatingsMap, MediaMap, SteamRatingsMap, CuratedMap } from '@/lib/types';
+import { useRouter } from 'next/navigation';
+import { NintendoGame, Preferences, SortOption, RatingsMap, MediaMap, SteamRatingsMap, CuratedSources } from '@/lib/types';
 import { classifyGame, hasBlockedSteamTags } from '@/lib/filters';
 import { bayesianScore, computeGlobalMean, CONFIDENT_THRESHOLD, computeShovelwareScore, SHOVELWARE_THRESHOLD } from '@/lib/sort-utils';
 import GameCard from './GameCard';
@@ -13,6 +14,7 @@ type ViewTab = 'deals' | 'collections' | 'sports' | 'thinking' | 'hidden' | 'wat
 type CurationKind = 'nintendolife' | 'ntdeals' | null;
 
 const DEFAULT_PREFS: Preferences = { hiddenGames: [], watchGames: {}, thinkingAbout: [] };
+const EMPTY_CURATED: CuratedSources = { nintendolife: {}, ntdeals: {} };
 
 interface DealsClientProps {
   initialGameId?: string;
@@ -30,6 +32,7 @@ type PreferenceActionGameState = {
 };
 
 export default function DealsClient({ initialGameId }: DealsClientProps) {
+  const router = useRouter();
   const [allGames, setAllGames] = useState<NintendoGame[]>([]);
   const [allTotal, setAllTotal] = useState(0);
   const [collectionGames, setCollectionGames] = useState<NintendoGame[]>([]);
@@ -40,7 +43,7 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
   const [ratings, setRatings] = useState<RatingsMap>({});
   const [media, setMedia] = useState<MediaMap>({});
   const [steamRatings, setSteamRatings] = useState<SteamRatingsMap>({});
-  const [curatedMap, setCuratedMap] = useState<CuratedMap>({});
+  const [curatedSources, setCuratedSources] = useState<CuratedSources>(EMPTY_CURATED);
   const [detailGame, setDetailGame] = useState<NintendoGame | null>(null);
   const [sort, setSort] = useState<SortOption>('value');
   const [search, setSearch] = useState('');
@@ -182,32 +185,45 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
       const res = await fetch('/api/curated');
       if (res.ok) {
         const data = await res.json();
-        setCuratedMap(data);
+        if (data && typeof data === 'object') {
+          setCuratedSources({
+            nintendolife: data.nintendolife && typeof data.nintendolife === 'object' ? data.nintendolife : {},
+            ntdeals: data.ntdeals && typeof data.ntdeals === 'object' ? data.ntdeals : {},
+          });
+        }
       }
     } catch {
       // continue
     }
   }, []);
 
-  useEffect(() => { fetchMainGames(); }, [fetchMainGames]);
-  useEffect(() => { fetchPreferences(); }, [fetchPreferences]);
-  useEffect(() => { fetchRatings(); }, [fetchRatings]);
-  useEffect(() => { fetchMedia(); }, [fetchMedia]);
-  useEffect(() => { fetchSteam(); }, [fetchSteam]);
-  useEffect(() => { fetchCurated(); }, [fetchCurated]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void fetchMainGames();
+      void fetchPreferences();
+      void fetchRatings();
+      void fetchMedia();
+      void fetchSteam();
+      void fetchCurated();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchMainGames, fetchPreferences, fetchRatings, fetchMedia, fetchSteam, fetchCurated]);
 
   useEffect(() => {
-    if (activeTab === 'collections' && !collectionsLoaded) fetchCollections();
-    if (activeTab === 'sports' && !sportsLoaded) fetchSports();
+    const timer = window.setTimeout(() => {
+      if (activeTab === 'collections' && !collectionsLoaded) void fetchCollections();
+      if (activeTab === 'sports' && !sportsLoaded) void fetchSports();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [activeTab, collectionsLoaded, sportsLoaded, fetchCollections, fetchSports]);
 
   useEffect(() => {
-    if (collectionsLoaded) fetchCollections();
-    if (sportsLoaded) fetchSports();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sort, search]);
-
-  useEffect(() => { setVisibleCount(48); }, [sort, activeTab, search]);
+    const timer = window.setTimeout(() => {
+      if (collectionsLoaded) void fetchCollections();
+      if (sportsLoaded) void fetchSports();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [sort, search, collectionsLoaded, sportsLoaded, fetchCollections, fetchSports]);
 
   useEffect(() => {
     if (!initialGameId || deepLinkHandledRef.current) return;
@@ -222,9 +238,11 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
       sportsGames.find((g) => g.fs_id === initialGameId);
 
     if (deepLinkGame) {
-      setDetailGame(deepLinkGame);
-      deepLinkHandledRef.current = true;
-      return;
+      const frame = window.requestAnimationFrame(() => {
+        setDetailGame(deepLinkGame);
+        deepLinkHandledRef.current = true;
+      });
+      return () => window.cancelAnimationFrame(frame);
     }
 
     if (loading || deepLinkLookupStartedRef.current) return;
@@ -245,6 +263,21 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
       }
     })();
   }, [initialGameId, detailGame, allGames, collectionGames, sportsGames, loading]);
+
+  function handleSearchChange(value: string) {
+    setSearch(value);
+    setVisibleCount(48);
+  }
+
+  function handleSortChange(value: SortOption) {
+    setSort(value);
+    setVisibleCount(48);
+  }
+
+  function handleTabChange(value: ViewTab) {
+    setActiveTab(value);
+    setVisibleCount(48);
+  }
 
   // Infinite scroll
   useEffect(() => {
@@ -399,7 +432,7 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
 
   async function handleLogout() {
     await fetch('/api/auth', { method: 'DELETE' });
-    window.location.href = '/login';
+    router.replace('/login');
   }
 
   const availableTags = useMemo(() => {
@@ -424,25 +457,24 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
     });
   }
 
-  function hasExcludedTag(tags?: string[]): boolean {
+  const hasExcludedTag = useCallback((tags?: string[]) => {
     if (!tags || excludedTags.size === 0) return false;
-    return tags.some(t => excludedTags.has(t));
-  }
+    return tags.some((tag) => excludedTags.has(tag));
+  }, [excludedTags]);
 
-  function getCurationKind(fsId: string): CurationKind {
-    const source = curatedMap[fsId]?.source;
-    if (source === 'nintendolife') return 'nintendolife';
-    if (source === 'ntdeals') return 'ntdeals';
+  const getCurationKind = useCallback((fsId: string): CurationKind => {
+    if (curatedSources.nintendolife[fsId]) return 'nintendolife';
+    if (curatedSources.ntdeals[fsId]) return 'ntdeals';
     return null;
-  }
+  }, [curatedSources]);
 
-  function isNintendoLifeCurated(fsId: string): boolean {
+  const isNintendoLifeCurated = useCallback((fsId: string): boolean => {
     return getCurationKind(fsId) === 'nintendolife';
-  }
+  }, [getCurationKind]);
 
-  function isNtDealsPick(fsId: string): boolean {
+  const isNtDealsPick = useCallback((fsId: string): boolean => {
     return getCurationKind(fsId) === 'ntdeals';
-  }
+  }, [getCurationKind]);
 
   const dealsGames = useMemo(() => {
     if (isSearch) {
@@ -461,7 +493,7 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
       if (hasBlockedSteamTags(s?.tags)) return false;
       if (hasExcludedTag(s?.tags)) return false;
 
-      if (computeShovelwareScore(game, s, ratings[game.fs_id]) >= SHOVELWARE_THRESHOLD) return false;
+      if (computeShovelwareScore(game, s) >= SHOVELWARE_THRESHOLD) return false;
 
       if (isNintendoLifeCurated(game.fs_id)) return true;
 
@@ -471,8 +503,7 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
 
       return true;
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allGames, preferences, ratings, steamRatings, curatedMap, excludedTags, isSearch]);
+  }, [allGames, preferences, ratings, steamRatings, isSearch, hasExcludedTag, isNintendoLifeCurated]);
 
   const lowConfidenceGames = useMemo(() => {
     return allGames.filter((game) => {
@@ -487,14 +518,13 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
 
       if (isNintendoLifeCurated(game.fs_id)) return false;
 
-      if (computeShovelwareScore(game, s, ratings[game.fs_id]) >= SHOVELWARE_THRESHOLD) return false;
+      if (computeShovelwareScore(game, s) >= SHOVELWARE_THRESHOLD) return false;
 
       const r = ratings[game.fs_id];
       const totalVotes = (r?.rating_count ?? 0) + (s?.votes ?? 0);
       return totalVotes < CONFIDENT_THRESHOLD;
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allGames, preferences, ratings, steamRatings, curatedMap, excludedTags]);
+  }, [allGames, preferences, ratings, steamRatings, hasExcludedTag, isNintendoLifeCurated]);
 
   const shovelwareGames = useMemo(() => {
     return allGames.filter((game) => {
@@ -505,9 +535,9 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
       const s = steamRatings[game.fs_id];
       if (hasBlockedSteamTags(s?.tags)) return false;
 
-      return computeShovelwareScore(game, s, ratings[game.fs_id]) >= SHOVELWARE_THRESHOLD;
+      return computeShovelwareScore(game, s) >= SHOVELWARE_THRESHOLD;
     });
-  }, [allGames, preferences, ratings, steamRatings]);
+  }, [allGames, preferences, steamRatings]);
 
   const hiddenCount = preferences.hiddenGames.length;
   const watchedCount = Object.keys(preferences.watchGames).length;
@@ -555,7 +585,7 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
     const curated = tabGames.filter((g) => isNintendoLifeCurated(g.fs_id));
     const nonCurated = tabGames.filter((g) => !isNintendoLifeCurated(g.fs_id));
 
-    curated.sort((a, b) => (curatedMap[a.fs_id]?.rank ?? 999) - (curatedMap[b.fs_id]?.rank ?? 999));
+    curated.sort((a, b) => (curatedSources.nintendolife[a.fs_id]?.rank ?? 999) - (curatedSources.nintendolife[b.fs_id]?.rank ?? 999));
 
     const maxPrice = 15;
     const scored = nonCurated.map((game) => {
@@ -596,7 +626,7 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
 
     const sortedNonCurated = [...tier1, ...tier2, ...tier3].map((s) => s.game);
     return [...curated, ...sortedNonCurated];
-  }, [tabGames, sort, ratings, steamRatings, globalMean, isClientSort, curatedMap, isSearch]);
+  }, [tabGames, sort, ratings, steamRatings, globalMean, isClientSort, curatedSources, isSearch, isNintendoLifeCurated]);
 
   const clientSortedTab = isClientSort && !isSearch && (activeTab === 'deals' || activeTab === 'low_confidence' || activeTab === 'shovelware');
   const displayGames = clientSortedTab
@@ -640,8 +670,8 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
       </header>
 
       <div className="bg-white px-4 sm:px-8 py-3 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center border-b border-gray-100">
-        <SearchBar value={search} onChange={setSearch} />
-        <SortSelect value={sort} onChange={setSort} />
+        <SearchBar key={search} value={search} onChange={handleSearchChange} />
+        <SortSelect value={sort} onChange={handleSortChange} />
       </div>
 
       {activeTab === 'deals' && (
@@ -700,7 +730,7 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
             {TABS.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => handleTabChange(tab.id)}
                 className={`px-4 py-2.5 text-sm font-medium transition-colors relative whitespace-nowrap ${
                   activeTab === tab.id
                     ? 'text-[#E60012]'
@@ -829,7 +859,10 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
           rating={ratings[detailGame.fs_id]}
           steam={steamRatings[detailGame.fs_id]}
           media={media[detailGame.fs_id]}
-          curatedEntry={curatedMap[detailGame.fs_id]}
+          curatedEntries={[
+            curatedSources.nintendolife[detailGame.fs_id],
+            curatedSources.ntdeals[detailGame.fs_id],
+          ].filter((entry) => entry !== undefined)}
           onClose={() => setDetailGame(null)}
         />
       )}

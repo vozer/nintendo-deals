@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRatings, saveRatings } from '@/lib/ratings-storage';
+import { isRatingsSnapshot } from '@/lib/snapshot-validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,15 +25,11 @@ export async function PUT(req: NextRequest) {
   }
 
   try {
-    const ratings = await req.json();
-    const count = Object.keys(ratings).length;
-
-    if (count === 0) {
-      return NextResponse.json(
-        { error: 'Refusing to save empty data — would wipe existing entries' },
-        { status: 400 },
-      );
+    const ratings: unknown = await req.json();
+    if (!isRatingsSnapshot(ratings)) {
+      return NextResponse.json({ error: 'Invalid ratings snapshot' }, { status: 400 });
     }
+    const count = Object.keys(ratings).length;
 
     const existing = await getRatings();
     const existingCount = Object.keys(existing).length;

@@ -1,5 +1,6 @@
-import { put, get as blobGet } from '@vercel/blob';
+import { put } from '@vercel/blob';
 import { MediaMap } from './types';
+import { readPrivateJsonMap } from './blob-json';
 
 const MEDIA_KEY = 'media.json';
 
@@ -8,15 +9,7 @@ function getToken(): string | undefined {
 }
 
 export async function getMedia(): Promise<MediaMap> {
-  try {
-    const token = getToken();
-    const result = await blobGet(MEDIA_KEY, { access: 'private', token });
-    if (!result || result.statusCode !== 200) return {};
-    const text = await new Response(result.stream).text();
-    return JSON.parse(text) as MediaMap;
-  } catch {
-    return {};
-  }
+  return readPrivateJsonMap<MediaMap>(MEDIA_KEY, getToken());
 }
 
 export async function saveMedia(media: MediaMap): Promise<void> {

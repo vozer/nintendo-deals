@@ -1,7 +1,7 @@
 # Nintendo Deals System Audit And Remediation Plan
 
 **Date:** 2026-09-28  
-**Plan status:** Proposed - implementation requires approval  
+**Plan status:** Implemented locally; production release pending separate approval
 **Audited revision:** `65bc1bac57313dea8f12c04bdf141a6bdf427ff0`  
 **Evidence:** [Source audit](../research/2026-09-28-nintendo-deals-source-audit.md), [requirements](../requirements.md), [use cases](../use_cases.puml), [entity model](../entity_model.md)
 
@@ -206,3 +206,11 @@ Weekly or manual GitHub Actions
 ## Approval Boundary
 
 Approval of this document authorizes implementation and local deterministic testing only. It does not authorize a production scraper run, a production preference migration, Telegram message delivery, webhook reconfiguration, a git push, or a production Vercel promotion. Each of those keeps its existing explicit gate.
+
+## Local Implementation Evidence
+
+- TypeScript: `npx tsc --noEmit` passed; ESLint passed without warnings; Vitest passed 38 tests.
+- Python: 33 `unittest` tests and `py_compile` passed.
+- Build and browser: `npm run build` passed; Playwright passed the deep-link/dialog journey at 375px and 1200px.
+- Documentation and automation syntax: `npm run check:aiup`, workflow YAML parsing, and shell syntax checks passed.
+- Not exercised: GitHub Actions schedule delivery, live source refreshes, production Blob preference migration, real Telegram delivery/callback, Vercel deployment, or automated serious/critical accessibility scanning. These remain separate release checks.

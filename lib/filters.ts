@@ -1,11 +1,12 @@
 import { NintendoGame } from './types';
+import contentPolicy from '@/shared/content-policy.json';
 
-const BLOCKED_TITLE_RE = /\b(hentai|pretty\s+girls|mahjong|solitaire|jigsaw\s+puzzle)\b/i;
-const DATING_CONTEXT_RE = /\b(dating|dates?\s+(boys?|girls?|sim|everything|simulator|z\b)|date\s+(z|everything)|blind\s+dates?|love\s+&?\s*horoscope\s+dating|sexy\s+halloween|romantic\s+date|romantic\b.*\bdate|date\s+with\b|zodiac\s+date|romance\b.*\b(boys?|anime)|boyfriend|girlfriend|otome|waifu|harem)\b/i;
+const BLOCKED_TITLE_RES = contentPolicy.blockedTitlePatterns.map(pattern => new RegExp(pattern, 'i'));
+const BLOCKED_STEAM_TAGS = new Set(['Hentai', 'NSFW', 'Dating Sim', 'Otome']);
 
-const BLOCKED_STEAM_TAGS = new Set([
-  'Hentai', 'NSFW', 'Dating Sim', 'Otome',
-]);
+export function isBlockedTitle(title: string): boolean {
+  return BLOCKED_TITLE_RES.some(pattern => pattern.test(title));
+}
 
 export function hasBlockedSteamTags(tags?: string[]): boolean {
   if (!tags) return false;
@@ -19,8 +20,7 @@ export type GameClassification = 'deals' | 'collections' | 'sports' | 'blocked';
 export function classifyGame(game: NintendoGame): GameClassification {
   const title = game.title;
 
-  if (BLOCKED_TITLE_RE.test(title)) return 'blocked';
-  if (DATING_CONTEXT_RE.test(title)) return 'blocked';
+  if (isBlockedTitle(title)) return 'blocked';
 
   if (COLLECTION_RE.test(title)) return 'collections';
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 
 interface SearchBarProps {
   value: string;
@@ -10,10 +10,6 @@ interface SearchBarProps {
 export default function SearchBar({ value, onChange }: SearchBarProps) {
   const [localValue, setLocalValue] = useState(value);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-
-  useEffect(() => {
-    setLocalValue(value);
-  }, [value]);
 
   function handleChange(newValue: string) {
     setLocalValue(newValue);
