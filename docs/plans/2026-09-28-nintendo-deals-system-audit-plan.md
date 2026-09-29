@@ -1,7 +1,7 @@
 # Nintendo Deals System Audit And Remediation Plan
 
 **Date:** 2026-09-28  
-**Plan status:** Implemented and deployed; first scheduled worker run and side-effecting production tests remain pending
+**Plan status:** Remediation implemented; final login-landmark fix is awaiting production redeploy, and the first scheduled worker run remains pending
 **Audited revision:** `65bc1bac57313dea8f12c04bdf141a6bdf427ff0`  
 **Evidence:** [Source audit](../research/2026-09-28-nintendo-deals-source-audit.md), [requirements](../requirements.md), [use cases](../use_cases.puml), [entity model](../entity_model.md)
 
@@ -212,6 +212,7 @@ The original approval authorized implementation and local deterministic testing 
 - TypeScript: `npx tsc --noEmit` passed; ESLint passed without warnings; Vitest passed 38 tests.
 - Python: 33 `unittest` tests and `py_compile` passed.
 - Build and browser: `npm run build` passed; Playwright passed the deep-link/dialog journey at 375px and 1200px, with axe-core reporting zero serious or critical dialog findings at both sizes.
+- Accessibility follow-up: axe-core reports zero login-page violations after adding the main landmark; that last markup fix is covered by the same 375px/1200px browser tests and is awaiting production redeploy.
 - Documentation and automation syntax: `npm run check:aiup`, workflow YAML parsing, and shell syntax checks passed.
 - Production release: commit `5e83df6` was pushed to `main`; Vercel production deployment `dpl_BX9KnqMtXPrujFqkcsuLRbrfPquC` is Ready and aliased to `https://nintendo-deals.vercel.app`.
 - Production HTTP checks: deep-link login redirect preserved `/?game=1337462`; login returned 200; protected catalog/game APIs redirected to login; curated, ratings, media, and Steam GET APIs returned 200; unauthenticated preference/action writes returned 401.

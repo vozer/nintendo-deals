@@ -64,7 +64,7 @@ function LoginShell({
   onSubmit?: (e: React.FormEvent) => void;
 }) {
   return (
-    <div className="min-h-screen bg-white flex items-center justify-center px-6">
+    <main className="min-h-screen bg-white flex items-center justify-center px-6">
       <form onSubmit={onSubmit} className="w-full max-w-xs flex flex-col items-center gap-6">
         <div className="w-12 h-12 rounded-full bg-[#E60012] flex items-center justify-center">
           <svg
@@ -113,6 +113,6 @@ function LoginShell({
           <p className="text-sm text-red-500">{error}</p>
         )}
       </form>
-    </div>
+    </main>
   );
 }

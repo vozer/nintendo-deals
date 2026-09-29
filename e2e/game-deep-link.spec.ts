@@ -63,21 +63,25 @@ for (const viewport of [{ width: 375, height: 812 }, { width: 1200, height: 900 
 
     await expect(page).toHaveURL(/\/login\?/);
     expect(new URL(page.url()).searchParams.get('next')).toBe('/?game=1337462');
+    await page.addScriptTag({ content: axe.source });
+    const loginViolations = await page.evaluate(async () => {
+      const axeOnWindow = (window as unknown as { axe: typeof axe }).axe;
+      const scan = await axeOnWindow.run(document);
+      return scan.violations.map((violation) => ({ id: violation.id, impact: violation.impact }));
+    });
+    expect(loginViolations).toEqual([]);
     await page.getByPlaceholder('Enter password...').fill('synthetic-e2e-password');
     await page.getByRole('button', { name: 'Enter', exact: true }).click();
 
     const dialog = page.getByRole('dialog', { name: game.title });
     await expect(dialog).toBeVisible();
-    const seriousViolations = await page.evaluate(async (source) => {
-      const script = document.createElement('script');
-      script.textContent = source;
-      document.head.append(script);
+    const seriousViolations = await page.evaluate(async () => {
       const axeOnWindow = (window as unknown as { axe: typeof axe }).axe;
       const results = await axeOnWindow.run(document);
       return results.violations
         .filter((violation) => violation.impact === 'serious' || violation.impact === 'critical')
         .map((violation) => ({ id: violation.id, targets: violation.nodes.map((node) => node.target) }));
-    }, axe.source);
+    });
     expect(seriousViolations).toEqual([]);
     await expect(dialog.getByText('A synthetic editorial note.')).toBeVisible();
     await expect(dialog.getByText('NT Deals', { exact: true })).toBeVisible();
