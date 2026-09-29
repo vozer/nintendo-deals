@@ -14,6 +14,7 @@
 
 - Required provider credentials are configured for the selected refresh mode.
 - A previous valid enrichment snapshot may exist.
+- Standalone refresh scripts resolve repository modules without relying on an ambient `PYTHONPATH`.
 
 ## Main Success Scenario
 

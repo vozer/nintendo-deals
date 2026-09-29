@@ -2,11 +2,15 @@ import argparse
 from datetime import datetime, timezone
 import json
 import os
+from pathlib import Path
+import sys
 import urllib.parse
 import urllib.request
 import time
 import uuid
 from urllib.parse import urljoin
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from automation.curated_sources import match_exact_catalog_title, parse_nintendolife_selects
 from automation.content_policy import ORIGINAL_SWITCH_FILTER
