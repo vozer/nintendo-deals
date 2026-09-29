@@ -226,7 +226,7 @@ export default function GameCard({ game, preferences, rating, steam, media, cura
           {isOnSale && game.price_discounted_f != null ? (
             <>
               {game.price_regular_f != null && (
-                <span className="text-sm text-gray-400 line-through">
+                <span className="text-sm text-gray-500 line-through">
                   {game.price_regular_f.toFixed(2)} €
                 </span>
               )}

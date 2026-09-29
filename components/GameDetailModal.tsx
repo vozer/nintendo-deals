@@ -200,7 +200,7 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
               {game.price_has_discount_b !== false && game.price_discounted_f != null ? (
                 <>
                   {game.price_regular_f != null && (
-                    <div className="text-sm text-gray-400 line-through">
+                    <div className="text-sm text-gray-500 line-through">
                       {game.price_regular_f.toFixed(2)} €
                     </div>
                   )}

@@ -211,9 +211,9 @@ The original approval authorized implementation and local deterministic testing 
 
 - TypeScript: `npx tsc --noEmit` passed; ESLint passed without warnings; Vitest passed 38 tests.
 - Python: 33 `unittest` tests and `py_compile` passed.
-- Build and browser: `npm run build` passed; Playwright passed the deep-link/dialog journey at 375px and 1200px.
+- Build and browser: `npm run build` passed; Playwright passed the deep-link/dialog journey at 375px and 1200px, with axe-core reporting zero serious or critical dialog findings at both sizes.
 - Documentation and automation syntax: `npm run check:aiup`, workflow YAML parsing, and shell syntax checks passed.
 - Production release: commit `5e83df6` was pushed to `main`; Vercel production deployment `dpl_BX9KnqMtXPrujFqkcsuLRbrfPquC` is Ready and aliased to `https://nintendo-deals.vercel.app`.
 - Production HTTP checks: deep-link login redirect preserved `/?game=1337462`; login returned 200; protected catalog/game APIs redirected to login; curated, ratings, media, and Steam GET APIs returned 200; unauthenticated preference/action writes returned 401.
 - Worker configuration: GitHub repository variable `NINTENDO_DEALS_BASE_URL` is configured to the canonical public app URL; the workflow reads it as a variable, not a secret.
-- Not exercised: a live GitHub Actions schedule/worker run, source snapshot publication, production preference writes/migration, real Telegram delivery/callback, webhook reconfiguration, or automated serious/critical accessibility scanning. The worker can overwrite production snapshots and send irreversible messages; these require a specific reviewed run manifest and approval. The next daily schedule is the first natural end-to-end worker check.
+- Not exercised: a live GitHub Actions schedule/worker run, source snapshot publication, production preference writes/migration, real Telegram delivery/callback, or webhook reconfiguration. The worker can overwrite production snapshots and send irreversible messages; these require a specific reviewed run manifest and approval. The next daily schedule is the first natural end-to-end worker check.

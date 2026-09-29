@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import axe from 'axe-core';
 
 const game = {
   fs_id: '1337462',
@@ -19,6 +20,10 @@ const game = {
 };
 
 async function stubLocalApis(page: import('@playwright/test').Page) {
+  await page.route('**/game.jpg', (route) => route.fulfill({
+    contentType: 'image/svg+xml',
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1" fill="#fff"/></svg>',
+  }));
   await page.route('**/api/games*', (route) => route.fulfill({ json: { games: [], total: 0 } }));
   await page.route('**/api/game?*', (route) => route.fulfill({ json: { game } }));
   await page.route('**/api/preferences', (route) => route.fulfill({
@@ -63,6 +68,17 @@ for (const viewport of [{ width: 375, height: 812 }, { width: 1200, height: 900 
 
     const dialog = page.getByRole('dialog', { name: game.title });
     await expect(dialog).toBeVisible();
+    const seriousViolations = await page.evaluate(async (source) => {
+      const script = document.createElement('script');
+      script.textContent = source;
+      document.head.append(script);
+      const axeOnWindow = (window as unknown as { axe: typeof axe }).axe;
+      const results = await axeOnWindow.run(document);
+      return results.violations
+        .filter((violation) => violation.impact === 'serious' || violation.impact === 'critical')
+        .map((violation) => ({ id: violation.id, targets: violation.nodes.map((node) => node.target) }));
+    }, axe.source);
+    expect(seriousViolations).toEqual([]);
     await expect(dialog.getByText('A synthetic editorial note.')).toBeVisible();
     await expect(dialog.getByText('NT Deals', { exact: true })).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Close game details' })).toBeFocused();
