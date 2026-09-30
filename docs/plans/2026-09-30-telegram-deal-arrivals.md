@@ -13,10 +13,18 @@
 - 45 TypeScript tests, 41 Python tests; lint, TypeScript checking, production build, AIUP checking, and both local Playwright viewport tests passed (375/1200 pixels).
 - Read-only production Nintendo lookup: none of the 10 watched games qualifies. Dead Cells: 18.89 EUR versus 5 EUR; Disco Elysium: 11.99 EUR versus 5 EUR; the remaining eight have no current discounted price.
 - Preference checkpoint: 157 hidden, 10 watched, 4 thinking. Saved locally before deployment for exact post-release comparison, without committing user data.
-- Deployment and live image/snapshot evidence will be recorded after verification. Production callbacks are not simulated because that would alter the shopper's lists.
+- Code commit `c2af080` pushed to `main` and deployed explicitly to the existing production project. Vercel deployment `74N7T34YRJ5U41NcgkAdfDMnSrFd` is aliased to `https://nintendo-deals.vercel.app`.
+- One real Future Knight photo preview was accepted by Telegram with Nintendo/Nintendo Life buttons. No image rejection or text fallback occurred. Production callbacks are not simulated because that would alter the shopper's lists; caption callbacks were covered at the local HTTP boundary.
+- Real non-dry-run GitHub execution [36731310379](https://github.com/vozer/nintendo-deals/actions/runs/36731310379) succeeded: 3,053 catalog offers, 104 homepage-eligible games, quiet first baseline persisted, 77 missing ratings added, zero watched threshold alerts, and zero duplicate digest sends (10 already claimed earlier that day).
+- Anonymous production arrival POST and delivery-status GET both returned 401. The successful authenticated worker crossed the real comparison and snapshot-commit API boundaries.
+- Exact before/after preference JSON comparison passed: all 157 hidden, 10 watched titles/thresholds, and 4 thinking items unchanged. The new snapshot was read independently from private Blob and contains 104 IDs dated 2026-09-30.
 
 ## Limitations
 
 - No previous eligible-ID history exists, so retrospective arrivals cannot be reconstructed reliably. First run establishes today's baseline; subsequent successful daily runs notify new entrants.
 - A claimed but unconfirmed new-deal send stops same-day replay for operator review; it is not blindly resent after a timeout.
 - Title images are supported; video uploading is not introduced.
+
+## Reflection
+
+The repeated confusion was terminology: existing "price alerts" meant watched thresholds, not newly eligible offers. Distinct `price_alerts` and `new_deals` run metrics now make that difference explicit. This was a product behavior gap, not a workspace-rule gap; no agent instructions were changed. The unrelated pre-existing AGENTS.md change and local browser output remain untouched.
