@@ -37,6 +37,8 @@ This catalog reverse-engineers the current product and records the observable ga
 
 ## Constraints
 
+FR-012 (2026-09-30): Daily new-deal notifications compare successful complete homepage-eligible snapshots, baseline without historical flooding, exclude hidden/watched/thinking games, and preserve preferences. All daily game messages use available title images, bounded captions, source URL buttons and replay-safe caption/text actions. See UC-005.
+
 | ID | Title | Constraint | Category | Priority | Status |
 |---|---|---|---|---|---|
 | C-001 | Web Runtime | The website and inbound webhook must run on the existing Next.js Vercel project. | Technical | High | Implemented |

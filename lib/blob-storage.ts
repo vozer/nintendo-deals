@@ -252,6 +252,10 @@ export async function claimDailyDelivery(date: string, key: string): Promise<boo
   throw new Error('Daily delivery state changed too frequently; retry the claim');
 }
 
+export async function hasDailyDelivery(date: string, key: string): Promise<boolean> {
+  return (await readState()).deliveryKeysByDate[date]?.includes(key) ?? false;
+}
+
 export async function savePreferences(prefs: Preferences): Promise<void> {
   await updatePreferencesAtomically(() => prefs);
 }

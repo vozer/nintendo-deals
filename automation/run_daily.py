@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import html
 import json
 import os
 import re
@@ -57,6 +56,7 @@ SOLR_FIELDS = ",".join(
         "excerpt",
         "url",
         "pretty_game_categories_txt",
+        "game_categories_txt",
         "publisher",
         "system_type",
         "pretty_date_s",
@@ -66,7 +66,7 @@ SUMMARY_FIELDS = (
     "catalog_records", "games", "watched_games", "ratings_records",
     "nintendolife_entries", "ntdeals_entries", "rating_updates",
     "price_alerts", "digest_items", "price_alerts_sent",
-    "digest_messages_sent", "duration_seconds",
+    "digest_messages_sent", "new_deals", "new_deals_sent", "eligible_deals", "deals_baseline_initialized", "duration_seconds",
 )
 RUN_STAGE = "startup"
 RUN_STARTED_AT = time.monotonic()
@@ -408,12 +408,37 @@ def enrich_ratings(
 
 
 def telegram_request(bot_token: str, method: str, payload: dict[str, Any]) -> Any:
-    return request_json(
+    result = request_json(
         f"https://api.telegram.org/bot{bot_token}/{method}",
         method="POST",
         payload=payload,
         timeout=30,
     )
+    if not isinstance(result, dict) or result.get("ok") is not True:
+        raise RuntimeError(f"Telegram {method} rejected the request")
+    return result
+
+
+def send_game_message(bot_token: str, chat_id: str, game: dict[str, Any],
+                      curated_entry: dict[str, Any], preferences: dict[str, Any],
+                      base_url: str, heading: str = "") -> None:
+    text = (f"<b>{heading}</b>\n" if heading else "") + build_digest_message(game, curated_entry, preferences)
+    payload = {"chat_id": chat_id, "parse_mode": "HTML",
+               "reply_markup": {"inline_keyboard": build_inline_keyboard(str(game["fs_id"]), base_url, game, curated_entry)}}
+    photo = str(game.get("image_url_h2x1_s") or game.get("image_url_sq_s") or "").strip()
+    if photo.startswith("//"):
+        photo = "https:" + photo
+    if photo.startswith("https://"):
+        try:
+            telegram_request(bot_token, "sendPhoto", {**payload, "photo": photo, "caption": text})
+            return
+        except RuntimeError as error:
+            # Only a definite image rejection is safe to retry as text, not a timeout.
+            image_errors = ("wrong file identifier", "failed to get http url content", "photo_invalid", "image_process_failed", "wrong type of the web page content")
+            if "HTTP 400" not in str(error) or not any(reason in str(error).lower() for reason in image_errors):
+                raise
+            print("Telegram rejected the title image; sending the game as text.", file=sys.stderr)
+    telegram_request(bot_token, "sendMessage", {**payload, "text": text, "disable_web_page_preview": True})
 
 
 def claim_daily_delivery(base_url: str, api_key: str, date: str, key: str) -> bool:
@@ -435,6 +460,8 @@ def send_price_alerts(
     base_url: str,
     api_key: str,
     delivery_date: str,
+    curated: dict[str, dict[str, Any]] | None = None,
+    preferences: dict[str, Any] | None = None,
 ) -> int:
     sent = 0
     for game, watch in alerts:
@@ -442,20 +469,8 @@ def send_price_alerts(
         threshold = str(watch.get("threshold"))
         if not claim_daily_delivery(base_url, api_key, delivery_date, f"alert:{fs_id}:{threshold}"):
             continue
-        title = html.escape(str(game.get("title") or watch.get("title") or "Untitled game"))
-        price = html.escape(f"{float(game.get('price_discounted_f')):.2f}€")
-        threshold = html.escape(threshold)
-        url = html.escape(str(game.get("url") or ""))
-        telegram_request(
-            bot_token,
-            "sendMessage",
-            {
-                "chat_id": chat_id,
-                "text": f"<b>Price alert</b>\n{title}\nNow: {price} (under {threshold}€)\n{url}",
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            },
-        )
+        entry = {**(curated or {}).get(fs_id, {}), "review": f"Price alert: now below your {threshold} EUR threshold."}
+        send_game_message(bot_token, chat_id, game, entry, preferences or {}, base_url, "Price alert")
         sent += 1
     return sent
 
@@ -475,17 +490,52 @@ def send_digest(
         fs_id = str(game["fs_id"])
         if not claim_daily_delivery(base_url, api_key, delivery_date, f"digest:{fs_id}"):
             continue
-        telegram_request(
-            bot_token,
-            "sendMessage",
-            {
-                "chat_id": chat_id,
-                "text": build_digest_message(game, curated[fs_id], preferences),
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-                "reply_markup": {"inline_keyboard": build_inline_keyboard(fs_id, base_url)},
-            },
-        )
+        send_game_message(bot_token, chat_id, game, curated[fs_id], preferences, base_url)
+        sent += 1
+    return sent
+
+
+def compare_deal_arrivals(base_url: str, api_key: str, games: list[dict[str, Any]]) -> dict[str, Any]:
+    # Send only fields used by the shared homepage filter, not descriptions/media.
+    catalog = []
+    for game in games:
+        systems = game.get("system_type") or []
+        catalog.append({"fs_id": str(game["fs_id"]), "title": str(game.get("title") or ""),
+            "publisher": str(game.get("publisher") or ""), "price_discounted_f": game.get("price_discounted_f"),
+            "price_has_discount_b": game.get("price_has_discount_b"),
+            "pretty_game_categories_txt": game.get("pretty_game_categories_txt") or [],
+            "game_categories_txt": game.get("game_categories_txt") or [],
+            "system_type": systems if isinstance(systems, list) else [systems]})
+    result = request_json(f"{base_url.rstrip('/')}/api/telegram/deals", method="POST",
+                          payload={"games": catalog, "total": len(catalog)}, headers={"x-api-key": api_key}, timeout=45)
+    if not isinstance(result, dict) or type(result.get("initialized")) is not bool or not (
+        result.get("etag") is None or isinstance(result.get("etag"), str)
+    ):
+        raise RuntimeError("Invalid deal comparison response")
+    for field in ("eligibleIds", "newIds"):
+        ids = result.get(field)
+        if not isinstance(ids, list) or any(not isinstance(value, str) or not value.isdigit() for value in ids) or len(set(ids)) != len(ids):
+            raise RuntimeError("Invalid deal comparison IDs")
+    if not set(result["newIds"]).issubset(result["eligibleIds"]) or not set(result["eligibleIds"]).issubset(str(game["fs_id"]) for game in games):
+        raise RuntimeError("Deal comparison IDs do not match the catalog")
+    return result
+
+
+def send_new_deals(bot_token: str, chat_id: str, games: list[dict[str, Any]], curated: dict[str, dict[str, Any]],
+                   preferences: dict[str, Any], base_url: str, api_key: str, delivery_date: str) -> int:
+    sent = 0
+    for game in sorted(games, key=lambda item: (-float(item.get("price_discount_percentage_f") or 0), str(item["fs_id"]))):
+        fs_id = str(game["fs_id"])
+        if not claim_daily_delivery(base_url, api_key, delivery_date, f"deal:{fs_id}"):
+            query = urllib.parse.urlencode({"date": delivery_date, "key": f"sent:deal:{fs_id}"})
+            confirmed = request_json(f"{base_url.rstrip('/')}/api/telegram/deliveries/claim?{query}", headers={"x-api-key": api_key})
+            if not isinstance(confirmed, dict) or confirmed.get("claimed") is not True:
+                raise RuntimeError("A new-deal delivery was claimed but not confirmed; review Telegram before retrying")
+            continue
+        if sent:
+            time.sleep(1)  # Telegram limits messages to one chat; pace larger daily arrivals.
+        send_game_message(bot_token, chat_id, game, curated.get(fs_id, {}), preferences, base_url, "New deal")
+        claim_daily_delivery(base_url, api_key, delivery_date, f"sent:deal:{fs_id}")
         sent += 1
     return sent
 
@@ -498,6 +548,7 @@ def run() -> dict[str, int]:
     RUN_STAGE = "nintendo_catalog"
     games = fetch_games()
     catalog_records = len(games)
+    catalog_games = games
 
     RUN_STAGE = "app_snapshots"
     preferences = fetch_app_json(base_url, "/api/preferences")
@@ -532,18 +583,10 @@ def run() -> dict[str, int]:
         "digest_items": len(digest_games),
     }
 
-    if dry_run:
-        summary["duration_seconds"] = int(time.monotonic() - RUN_STARTED_AT)
-        write_redacted_summary(summary)
-        print(json.dumps({"dry_run": True, **summary}, sort_keys=True))
-        return summary
-
     ratings_api_key = require_env("RATINGS_API_KEY")
-    bot_token = require_env("TELEGRAM_BOT_TOKEN")
-    chat_id = require_env("TELEGRAM_CHAT_ID")
     delivery_date = datetime.now(ZoneInfo("Europe/Madrid")).date().isoformat()
     RUN_STAGE = "ratings_publish"
-    if updates:
+    if updates and not dry_run:
         request_json(
             f"{base_url.rstrip('/')}/api/ratings",
             method="PUT",
@@ -551,14 +594,36 @@ def run() -> dict[str, int]:
             headers={"x-api-key": ratings_api_key},
             timeout=45,
         )
+    RUN_STAGE = "deal_arrival_comparison"
+    arrivals = compare_deal_arrivals(base_url, ratings_api_key, catalog_games)
+    new_ids = set(arrivals["newIds"])
+    summary.update({"eligible_deals": len(arrivals["eligibleIds"]), "new_deals": len(new_ids),
+                    "deals_baseline_initialized": int(not arrivals["initialized"])})
+    digest_games = [game for game in digest_games if str(game["fs_id"]) not in new_ids]
+    summary["digest_items"] = len(digest_games)
+    if dry_run:
+        summary["duration_seconds"] = int(time.monotonic() - RUN_STARTED_AT)
+        write_redacted_summary(summary)
+        print(json.dumps({"dry_run": True, **summary}, sort_keys=True))
+        return summary
+    bot_token = require_env("TELEGRAM_BOT_TOKEN")
+    chat_id = require_env("TELEGRAM_CHAT_ID")
+    RUN_STAGE = "new_deal_delivery"
+    summary["new_deals_sent"] = send_new_deals(bot_token, chat_id,
+        [game for game in catalog_games if str(game["fs_id"]) in new_ids], curated, preferences,
+        base_url, ratings_api_key, delivery_date)
     RUN_STAGE = "price_alert_delivery"
     summary["price_alerts_sent"] = send_price_alerts(
-        bot_token, chat_id, alerts, base_url, ratings_api_key, delivery_date
+        bot_token, chat_id, alerts, base_url, ratings_api_key, delivery_date, curated, preferences
     )
     RUN_STAGE = "digest_delivery"
     summary["digest_messages_sent"] = send_digest(
         bot_token, chat_id, digest_games, curated, preferences, base_url, ratings_api_key, delivery_date
     )
+    RUN_STAGE = "deal_snapshot_commit"
+    request_json(f"{base_url.rstrip('/')}/api/telegram/deals", method="PUT",
+                 payload={"eligibleIds": arrivals["eligibleIds"], "etag": arrivals["etag"], "date": delivery_date},
+                 headers={"x-api-key": ratings_api_key})
     summary["duration_seconds"] = int(time.monotonic() - RUN_STARTED_AT)
     RUN_STAGE = "complete"
     write_redacted_summary(summary)

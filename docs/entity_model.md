@@ -179,3 +179,7 @@ Stores a source-specific editorial or deal-pick signal; one game can retain both
 | refreshed_at | Time the signal was last refreshed | DateTime | - | Optional |
 
 **Constraints:** Each game and source pair must be unique; Nintendo Life remains the primary badge when both sources select the same game.
+
+### DAILY_DEALS_SNAPSHOT
+
+Private `telegram-deals.json` stores the sorted eligible Nintendo game IDs from the last successful daily delivery and its Madrid date. A strong Blob ETag is the conditional-write revision. Missing state means first-run baseline; invalid or unreadable state fails closed. It is independent of user preferences and Telegram callback metadata.

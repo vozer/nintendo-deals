@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { claimDailyDelivery } from '@/lib/blob-storage';
+import { claimDailyDelivery, hasDailyDelivery } from '@/lib/blob-storage';
 import { hasValidApiKey } from '@/lib/request-auth';
 
 export const dynamic = 'force-dynamic';
@@ -29,5 +29,17 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error('Failed to claim Telegram delivery:', error);
     return NextResponse.json({ error: 'Failed to claim delivery' }, { status: 500 });
+  }
+}
+
+export async function GET(req: NextRequest) {
+  if (!hasValidApiKey(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const date = req.nextUrl.searchParams.get('date');
+  const key = req.nextUrl.searchParams.get('key');
+  if (!isValidDate(date) || !isValidKey(key)) return NextResponse.json({ error: 'Invalid delivery lookup' }, { status: 400 });
+  try {
+    return NextResponse.json({ claimed: await hasDailyDelivery(date, key) });
+  } catch {
+    return NextResponse.json({ error: 'Cannot read delivery status' }, { status: 500 });
   }
 }

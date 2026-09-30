@@ -95,10 +95,18 @@ class WorkerRulesTests(unittest.TestCase):
             {"hiddenGames": [], "watchGames": {}},
         )
 
-        self.assertIn(
-            "Store: https://www.nintendo.com/es-es/Juegos/Programas-descargables-Nintendo-Switch/Future-Knight-3151132.html",
-            text,
-        )
+        self.assertNotIn("Store:", text)
+        keyboard = build_inline_keyboard("123", "https://app.test", game=game("123", "Pick", url="/es-es/game.html"), curated_entry={"source_url": "https://www.nintendolife.com/features/eshop-selects"})
+        self.assertEqual(keyboard[2], [
+            {"text": "Nintendo", "url": "https://www.nintendo.com/es-es/game.html"},
+            {"text": "Nintendo Life", "url": "https://www.nintendolife.com/features/eshop-selects"},
+        ])
+
+    def test_caption_bounds_long_escaped_content_and_keeps_action_status(self):
+        text = build_digest_message(game("123", "A & B", excerpt="<Adventure> " * 1000), {"review": "Good " * 500}, {})
+        self.assertLessEqual(len(text), 1000)
+        self.assertIn("A &amp; B", text)
+        self.assertIn("Status: Hidden No; Alert: none", text)
 
     def test_keyboard_uses_deep_link_and_callback_actions(self):
         keyboard = build_inline_keyboard("123", "https://nintendo-deals.vercel.app")

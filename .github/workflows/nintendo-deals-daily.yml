@@ -88,7 +88,8 @@ jobs:
               "nintendolife_entries", "ntdeals_entries", "nintendolife_duration_seconds", "nintendolife_source_entries",
               "nintendolife_matches", "nintendolife_rejections", "rating_updates",
               "duration_seconds", "failure_stage", "games", "price_alerts", "digest_items",
-              "price_alerts_sent", "digest_messages_sent",
+              "price_alerts_sent", "digest_messages_sent", "new_deals", "new_deals_sent",
+              "eligible_deals", "deals_baseline_initialized",
           }
           metrics = {}
           for filename in ("curated-run-summary.json", "daily-run-summary.json"):

@@ -39,7 +39,7 @@ vi.mock('@vercel/blob', () => ({
 
 import { POST } from './route';
 
-function callbackRequest(options: { secret?: string; chatId?: number; userId?: number } = {}) {
+function callbackRequest(options: { secret?: string; chatId?: number; userId?: number; photo?: boolean } = {}) {
   return new NextRequest('https://nintendo-deals.test/api/telegram/webhook', {
     method: 'POST',
     headers: {
@@ -53,7 +53,7 @@ function callbackRequest(options: { secret?: string; chatId?: number; userId?: n
         from: { id: options.userId ?? 77 },
         message: {
           message_id: 9,
-          text: '<b>Example game</b>',
+          ...(options.photo ? { caption: 'Adventure & puzzles\nStatus: Hidden No; Alert: none', reply_markup: { inline_keyboard: [[{ text: 'Nintendo', url: 'https://www.nintendo.com/game' }]] } } : { text: '<b>Example game</b>' }),
           chat: { id: options.chatId ?? 88 },
         },
       },
@@ -77,6 +77,18 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('Telegram callback webhook', () => {
+  it('edits photo captions and preserves source buttons after persisting', async () => {
+    const telegram = stubTelegram();
+    const response = await POST(callbackRequest({ photo: true }));
+    expect(response.status).toBe(200);
+    const [url, request] = telegram.mock.calls[1];
+    expect(String(url)).toContain('/editMessageCaption');
+    const payload = JSON.parse(String(request?.body));
+    expect(payload.caption).toContain('Status: Hidden Yes; Alert: none');
+    expect(payload.caption).toContain('Adventure &amp; puzzles');
+    expect(payload.reply_markup.inline_keyboard[0][0].text).toBe('Nintendo');
+    expect(state.events[0]).toBe('persist');
+  });
   function stubTelegram() {
     return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = input instanceof Request ? input.url : String(input);

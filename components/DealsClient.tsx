@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { NintendoGame, Preferences, SortOption, RatingsMap, MediaMap, SteamRatingsMap, CuratedSources } from '@/lib/types';
-import { classifyGame, hasBlockedSteamTags } from '@/lib/filters';
+import { classifyGame, hasBlockedSteamTags, isHomepageDeal } from '@/lib/filters';
 import { bayesianScore, computeGlobalMean, CONFIDENT_THRESHOLD, computeShovelwareScore, SHOVELWARE_THRESHOLD } from '@/lib/sort-utils';
 import GameCard from './GameCard';
 import GameDetailModal from './GameDetailModal';
@@ -482,26 +482,9 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
     }
 
     return allGames.filter((game) => {
-      const cls = classifyGame(game);
-      if (cls !== 'deals') return false;
-      if (preferences.hiddenGames.includes(game.fs_id)) return false;
-      if (preferences.thinkingAbout?.includes(game.fs_id)) return false;
-      const w = preferences.watchGames[game.fs_id];
-      if (w && game.price_discounted_f >= w.threshold) return false;
-
       const s = steamRatings[game.fs_id];
-      if (hasBlockedSteamTags(s?.tags)) return false;
-      if (hasExcludedTag(s?.tags)) return false;
-
-      if (computeShovelwareScore(game, s) >= SHOVELWARE_THRESHOLD) return false;
-
-      if (isNintendoLifeCurated(game.fs_id)) return true;
-
-      const r = ratings[game.fs_id];
-      const totalVotes = (r?.rating_count ?? 0) + (s?.votes ?? 0);
-      if (totalVotes < CONFIDENT_THRESHOLD) return false;
-
-      return true;
+      return !hasExcludedTag(s?.tags)
+        && isHomepageDeal(game, preferences, ratings[game.fs_id], s, isNintendoLifeCurated(game.fs_id));
     });
   }, [allGames, preferences, ratings, steamRatings, isSearch, hasExcludedTag, isNintendoLifeCurated]);
 

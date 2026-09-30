@@ -1,4 +1,5 @@
-import { NintendoGame } from './types';
+import { NintendoGame, GameRating, SteamRating, Preferences } from './types';
+import { computeShovelwareScore, SHOVELWARE_THRESHOLD, CONFIDENT_THRESHOLD } from './sort-utils';
 import contentPolicy from '@/shared/content-policy.json';
 
 const BLOCKED_TITLE_RES = contentPolicy.blockedTitlePatterns.map(pattern => new RegExp(pattern, 'i'));
@@ -28,6 +29,18 @@ export function classifyGame(game: NintendoGame): GameClassification {
   if (categories.includes(SPORTS_CATEGORY)) return 'sports';
 
   return 'deals';
+}
+
+export function isHomepageDeal(game: NintendoGame, preferences: Preferences,
+  rating: GameRating | undefined, steam: SteamRating | undefined, curated: boolean): boolean {
+  const watch = preferences.watchGames[game.fs_id];
+  return classifyGame(game) === 'deals'
+    && !preferences.hiddenGames.includes(game.fs_id)
+    && !preferences.thinkingAbout?.includes(game.fs_id)
+    && !(watch && game.price_discounted_f >= watch.threshold)
+    && !hasBlockedSteamTags(steam?.tags)
+    && computeShovelwareScore(game, steam) < SHOVELWARE_THRESHOLD
+    && (curated || (rating?.rating_count ?? 0) + (steam?.votes ?? 0) >= CONFIDENT_THRESHOLD);
 }
 
 export function classifyGames(

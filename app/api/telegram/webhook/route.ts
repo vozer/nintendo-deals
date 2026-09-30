@@ -63,18 +63,22 @@ export async function POST(req: NextRequest) {
         : action.action === 'hide' ? 'Game is already hidden' : `Alert is already set under ${action.threshold}€`,
     });
 
-    if (typeof message?.message_id !== 'number' || typeof message?.text !== 'string') {
+    const isCaption = typeof message?.caption === 'string';
+    const content = isCaption ? message.caption : message?.text;
+    if (typeof message?.message_id !== 'number' || typeof content !== 'string') {
       return NextResponse.json({ ok: true, changed: result.changed });
     }
 
     const baseUrl = process.env.NINTENDO_DEALS_BASE_URL || new URL(req.url).origin;
-    await telegramRequest(botToken, 'editMessageText', {
+    // Telegram returns plain text, not the original HTML. Escape it before editing.
+    const text = updateDigestStatus(content, result.game)
+      .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+    await telegramRequest(botToken, isCaption ? 'editMessageCaption' : 'editMessageText', {
       chat_id: chatId,
       message_id: message.message_id,
-      text: updateDigestStatus(message.text, result.game),
+      ...(isCaption ? { caption: text } : { text, disable_web_page_preview: true }),
       parse_mode: 'HTML',
-      disable_web_page_preview: true,
-      reply_markup: buildDigestKeyboard(action.fs_id, baseUrl),
+      reply_markup: message.reply_markup ?? buildDigestKeyboard(action.fs_id, baseUrl),
     });
 
     return NextResponse.json({ ok: true, changed: result.changed, game: result.game });

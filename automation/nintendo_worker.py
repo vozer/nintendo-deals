@@ -133,40 +133,46 @@ def build_digest_message(
     curated_entry: dict[str, Any],
     preferences: dict[str, Any],
 ) -> str:
-    title = html.escape(str(game.get("title") or curated_entry.get("title") or "Untitled game"))
-    excerpt = html.escape(str(game.get("excerpt") or "No store description available.").strip())
-    review = html.escape(str(curated_entry.get("review") or "No editorial note available.").strip())
+    def bounded(value: Any, limit: int) -> str:
+        result = ""
+        for character in str(value).strip():
+            escaped = html.escape(character)
+            if len((result + escaped).encode("utf-16-le")) // 2 > limit - 3:
+                return result + "..."
+            result += escaped
+        return result
+
+    title = bounded(game.get("title") or curated_entry.get("title") or "Untitled game", 110)
+    excerpt = bounded(game.get("excerpt") or "No store description available.", 340)
+    review = bounded(curated_entry.get("review") or "Meets the homepage Deals filters.", 160)
     categories = ", ".join(str(value) for value in (game.get("pretty_game_categories_txt") or [])[:3])
-    publisher = html.escape(str(game.get("publisher") or "Unknown publisher"))
+    publisher = bounded(game.get("publisher") or "Unknown publisher", 60)
     discount = game.get("price_discount_percentage_f")
     discount_text = f" (-{float(discount):.0f}%)" if discount is not None else ""
     fs_id = _game_id(game)
     watch = (preferences.get("watchGames") or {}).get(fs_id)
     status = f"Alert: under {watch.get('threshold')}€" if watch else "Alert: none"
     hidden = "Yes" if fs_id in {str(value) for value in preferences.get("hiddenGames", [])} else "No"
-    store_url = str(game.get("url") or "").strip()
-    if store_url:
-        store_url = urljoin("https://www.nintendo.com/", store_url)
 
     lines = [
         f"<b>{title}</b>",
         f"{_format_price(game.get('price_discounted_f'))}{discount_text} (was {_format_price(game.get('price_regular_f'))})",
-        f"Categories: {html.escape(categories or 'Uncategorized')}",
+        f"Categories: {bounded(categories or 'Uncategorized', 70)}",
         f"Publisher: {publisher}",
         "",
         f"{excerpt}",
         "",
         f"<b>Why it is here:</b> {review}",
         f"Status: Hidden {hidden}; {status}",
-        f"Store: {html.escape(store_url)}",
     ]
     return "\n".join(lines)
 
 
-def build_inline_keyboard(fs_id: str, base_url: str) -> list[list[dict[str, str]]]:
+def build_inline_keyboard(fs_id: str, base_url: str, game: dict[str, Any] | None = None,
+                          curated_entry: dict[str, Any] | None = None) -> list[list[dict[str, str]]]:
     base_url = base_url.rstrip("/")
     encoded_id = quote(str(fs_id), safe="")
-    return [
+    keyboard = [
         [
             {"text": "Show", "url": f"{base_url}/?game={encoded_id}"},
             {"text": "Hide", "callback_data": f"nd:hide:{fs_id}"},
@@ -176,6 +182,14 @@ def build_inline_keyboard(fs_id: str, base_url: str) -> list[list[dict[str, str]
             for threshold in THRESHOLDS
         ],
     ]
+    sources = []
+    store = urljoin("https://www.nintendo.com/", str((game or {}).get("url") or "")) if (game or {}).get("url") else ""
+    for label, url in [("Nintendo", store), ("Nintendo Life", (curated_entry or {}).get("source_url", ""))]:
+        if isinstance(url, str) and url.startswith("https://"):
+            sources.append({"text": label, "url": url})
+    if sources:
+        keyboard.append(sources)
+    return keyboard
 
 
 def best_title_match(title: str, candidates: list[dict[str, Any]], minimum: float = 0.70) -> tuple[dict[str, Any] | None, float]:

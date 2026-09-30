@@ -78,7 +78,7 @@ export async function telegramRequest(
   });
   const data = await response.json() as Record<string, unknown>;
   if (
-    method === 'editMessageText' &&
+    ['editMessageText', 'editMessageCaption'].includes(method) &&
     typeof data.description === 'string' &&
     data.description.toLowerCase().includes('message is not modified')
   ) {

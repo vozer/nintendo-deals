@@ -10,6 +10,18 @@
 **Status:** Implemented - audit found catalog truncation and schedule fragility  
 **Requirements:** [FR-006, FR-007, FR-010](../requirements.md)
 
+## Daily Deal Arrivals and Rich Messages (2026-09-30)
+
+- FR-012: Compare complete daily eligible Deals snapshots; notify games newly entering or re-entering the homepage Deals selection. Reuse the homepage classification, confidence, Steam-tag and shovelware rules, excluding hidden, watched and thinking games. Browser-only tag exclusions are not persisted and cannot affect scheduled selection.
+- Initialize the first snapshot without historical catch-up because no previous eligible snapshot exists (same baseline policy as AbonoTeatro). Commit the snapshot only after successful delivery; conditional writes reject stale workers. Store this history separately from preferences.
+- Watched threshold alerts remain distinct from new-deal arrivals. Daily metrics report both. Games sent as new arrivals are not also sent in that run's curated digest.
+- Send the available Nintendo title image using `sendPhoto`, with a bounded HTML caption retaining title, price, description, eligibility explanation and action status. Without an image, send text. Only an explicit Telegram image-rejection response permits text fallback; timeouts must not cause ambiguous duplicate sends.
+- Nintendo and Nintendo Life destinations are inline URL buttons (the latter only when a matched source URL exists), not raw body URLs. Hide/watch callbacks update either text or photo captions after persistence, preserving source buttons.
+- Existing daily delivery claims remain at-most-once: an ambiguous Telegram failure requires operator review, not a blind resend. No hidden/watch preference migration is permitted.
+- New-deal deliveries also record a confirmed-send marker; replay may advance the snapshot only when each existing claim has a confirmed send. Unconfirmed claims stop the run without committing its baseline.
+
+Telegram contract: [sendPhoto](https://core.telegram.org/bots/api#sendphoto), [editMessageCaption](https://core.telegram.org/bots/api#editmessagecaption).
+
 ## Preconditions
 
 - Daily delivery is configured for the shopper's Telegram destination.

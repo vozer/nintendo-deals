@@ -28,7 +28,7 @@ vi.mock('@vercel/blob', () => ({
   BlobPreconditionFailedError: class BlobPreconditionFailedError extends Error {},
 }));
 
-import { POST } from './route';
+import { GET, POST } from './route';
 
 function request(body: unknown, apiKey = 'test-api-key') {
   return new NextRequest('https://nintendo-deals.test/api/telegram/deliveries/claim', {
@@ -48,6 +48,17 @@ beforeEach(() => {
 });
 
 describe('daily Telegram delivery claim', () => {
+  it('looks up delivery confirmation without claiming or changing any preferences', async () => {
+    const url = 'https://nintendo-deals.test/api/telegram/deliveries/claim?date=2026-09-30&key=sent:deal:1004';
+    expect((await GET(new NextRequest(url))).status).toBe(401);
+    const lookup = () => GET(new NextRequest(url, { headers: { 'x-api-key': 'test-api-key' } }));
+    expect(await (await lookup()).json()).toEqual({ claimed: false });
+    expect(blobStore.raw).toBeNull();
+    await POST(request({ date: '2026-09-30', key: 'sent:deal:1004' }));
+    const before = blobStore.raw;
+    expect(await (await lookup()).json()).toEqual({ claimed: true });
+    expect(blobStore.raw).toBe(before);
+  });
   it('claims against existing preferences with a strong ETag and preserves all lists', async () => {
     const preferences = {
       hiddenGames: ['1001'],
