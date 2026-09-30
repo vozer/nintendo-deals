@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Telegram Alert actions now send persistent titled confirmations with a direct app game button instead of temporary success notifications. Preferences are saved before confirmation, replay receipts prevent duplicate confirmed replies, and existing game text/caption updates are retained.
+
 - Telegram review buttons prefer cached Steam links over Nintendo Life for all game messages, including non-curated deals and watched-price alerts. Nintendo Life remains the fallback when no usable Steam match exists; the Nintendo store button is unchanged. No new Steam scraping, preferences migration or retroactive message edits are required.
 
 ### Deployed Feature - 2026-09-30

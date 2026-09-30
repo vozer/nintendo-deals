@@ -86,6 +86,8 @@ Records that a profile is considering a game without setting a price alert.
 
 ### TELEGRAM_UPDATE
 
+Internal replay IDs also include `alert-reply:<SHA-256 callback ID>` claim and `alert-reply-sent:<SHA-256 callback ID>` confirmation markers for persistent Alert replies. They share the existing bounded replay buffer (1,000 metadata IDs), are excluded from public preference responses, and do not modify hidden/watched/thinking values.
+
 Tracks completed inbound callbacks so Telegram retries cannot apply the same action twice.
 
 | Attribute | Description | Data Type | Length/Precision | Validation Rules |

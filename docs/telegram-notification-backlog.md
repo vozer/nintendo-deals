@@ -19,6 +19,8 @@ Implementation is complete; the validation items below remain open. Improvements
 | ND-007 | Low / Optional UX improvement | Caption callbacks escape Telegram-returned plain text, preserving content and buttons but not reconstructing original bold entities. No video/trailer button is added. | Preserve safe Telegram entity formatting if styling loss matters; consider a trailer link when valid cached media exists. Video uploads were not part of the requested title-image change. |
 | ND-008 | Low / Optional preference improvement | Homepage tag exclusions are browser-local. Scheduled alerts share the canonical filter but cannot honor these local exclusions. | If server-synchronized tag preferences are desired, approve a backwards-compatible preference contract change and tests. Current arrival/history writes must not migrate or replace hidden/watch lists. |
 
+Alert-action confirmations now use a separate persistent chat reply with claim/confirmed markers in bounded internal replay metadata. This does not close ND-001 for daily watched alerts/digests or cross-date arrival recovery. Ambiguous reply delivery still requires operator review; automatically retrying it is not claimed as implemented.
+
 ## Safe Operations
 
 1. Inspect the failed GitHub step and redacted artifact before replaying. Distinguish new arrivals from watched-price thresholds; do not interpret `price_alerts: 0` as an empty Deals catalog.

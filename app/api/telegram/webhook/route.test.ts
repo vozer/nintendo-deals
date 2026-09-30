@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   events: [] as string[],
   failWrites: false,
   failEdits: 0,
+  failReplies: 0,
 }));
 
 vi.mock('@vercel/blob', () => ({
@@ -39,7 +40,7 @@ vi.mock('@vercel/blob', () => ({
 
 import { POST } from './route';
 
-function callbackRequest(options: { secret?: string; chatId?: number; userId?: number; photo?: boolean } = {}) {
+function callbackRequest(options: { secret?: string; chatId?: number; userId?: number; photo?: boolean; watch?: boolean; callbackId?: string } = {}) {
   return new NextRequest('https://nintendo-deals.test/api/telegram/webhook', {
     method: 'POST',
     headers: {
@@ -48,12 +49,12 @@ function callbackRequest(options: { secret?: string; chatId?: number; userId?: n
     },
     body: JSON.stringify({
       callback_query: {
-        id: 'callback-unique-1',
-        data: 'nd:hide:1001',
+        id: options.callbackId ?? 'callback-unique-1',
+        data: options.watch ? 'nd:watch:5:1001' : 'nd:hide:1001',
         from: { id: options.userId ?? 77 },
         message: {
           message_id: 9,
-          ...(options.photo ? { caption: 'Adventure & puzzles\nStatus: Hidden No; Alert: none', reply_markup: { inline_keyboard: [[{ text: 'Nintendo', url: 'https://www.nintendo.com/game' }]] } } : { text: '<b>Example game</b>' }),
+          ...(options.watch ? { caption: 'New deal\nFuture Knight\n11.99 EUR\nStatus: Hidden No; Alert: none' } : options.photo ? { caption: 'Adventure & puzzles\nStatus: Hidden No; Alert: none', reply_markup: { inline_keyboard: [[{ text: 'Nintendo', url: 'https://www.nintendo.com/game' }]] } } : { text: '<b>Example game</b>' }),
           chat: { id: options.chatId ?? 88 },
         },
       },
@@ -68,15 +69,54 @@ beforeEach(() => {
   state.events = [];
   state.failWrites = false;
   state.failEdits = 0;
+  state.failReplies = 0;
   process.env.TELEGRAM_WEBHOOK_SECRET = 'test-webhook-secret';
   process.env.TELEGRAM_BOT_TOKEN = 'test-bot-token';
   process.env.NINTENDO_TELEGRAM_CHAT_ID = '88';
   process.env.NINTENDO_TELEGRAM_USER_ID = '77';
+  process.env.NINTENDO_DEALS_BASE_URL = 'https://nintendo-deals.test';
 });
 
 afterEach(() => vi.restoreAllMocks());
 
 describe('Telegram callback webhook', () => {
+  it('does not claim a removed alert is set when replaying an old persisted action', async () => {
+    state.raw = JSON.stringify({ version: 1,
+      preferences: { hiddenGames: [], watchGames: {}, thinkingAbout: [] },
+      telegram: { processedUpdateIds: ['callback-unique-1'] } });
+    const telegram = stubTelegram();
+    expect((await POST(callbackRequest({ watch: true }))).status).toBe(200);
+    const reply = telegram.mock.calls.find(([url]) => String(url).endsWith('/sendMessage'));
+    expect(JSON.parse(String(reply?.[1]?.body)).text).toBe('Future Knight Alert is no longer set');
+    expect(JSON.parse(state.raw!).preferences.watchGames).toEqual({});
+  });
+  it('confirms a new deliberate alert click even when that threshold is already configured', async () => {
+    const telegram = stubTelegram();
+    await POST(callbackRequest({ watch: true }));
+    const response = await POST(callbackRequest({ watch: true, callbackId: 'callback-unique-2' }));
+    expect(response.status).toBe(200);
+    expect((await response.json()).changed).toBe(false);
+    expect(telegram.mock.calls.filter(([url]) => String(url).endsWith('/sendMessage'))).toHaveLength(2);
+  });
+  it('confirms alerts with one persistent titled message and a direct game link, not a toast', async () => {
+    state.raw = JSON.stringify({ hiddenGames: ['2002'], thinkingAbout: ['2003'],
+      watchGames: { '2004': { threshold: 2, title: 'Existing watch' } } });
+    const telegram = stubTelegram();
+    expect((await POST(callbackRequest({ watch: true }))).status).toBe(200);
+    expect((await POST(callbackRequest({ watch: true }))).status).toBe(200);
+    const calls = telegram.mock.calls.filter(([url]) => String(url).startsWith('https://api.telegram.org/'))
+      .map(([url, request]) => ({ url: String(url), body: JSON.parse(String(request?.body)) }));
+    const replies = calls.filter(call => call.url.endsWith('/sendMessage'));
+    expect(replies).toHaveLength(1);
+    expect(replies[0].body.text).toBe('Future Knight Alert for <5€ set');
+    expect(replies[0].body.reply_markup.inline_keyboard[0][0].url).toBe('https://nintendo-deals.test/?game=1001');
+    for (const ack of calls.filter(call => call.url.endsWith('/answerCallbackQuery'))) expect(ack.body.text).toBeUndefined();
+    expect(state.events[0]).toBe('persist');
+    expect(JSON.parse(state.raw!).preferences.watchGames['1001']).toEqual({ threshold: 5, title: 'Future Knight' });
+    expect(JSON.parse(state.raw!).preferences.watchGames['2004']).toEqual({ threshold: 2, title: 'Existing watch' });
+    expect(JSON.parse(state.raw!).preferences.hiddenGames).toEqual(['2002']);
+    expect(JSON.parse(state.raw!).preferences.thinkingAbout).toEqual(['2003']);
+  });
   it('edits photo captions and preserves source buttons after persisting', async () => {
     const telegram = stubTelegram();
     const response = await POST(callbackRequest({ photo: true }));
@@ -93,8 +133,13 @@ describe('Telegram callback webhook', () => {
     return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = input instanceof Request ? input.url : String(input);
       const isAck = url.includes('/answerCallbackQuery');
-      state.events.push(isAck ? 'ack' : 'edit');
-      if (!isAck && state.failEdits > 0) {
+      const isReply = url.includes('/sendMessage');
+      state.events.push(isAck ? 'ack' : isReply ? 'reply' : 'edit');
+      if (isReply && state.failReplies > 0) {
+        state.failReplies -= 1;
+        return Response.json({ ok: false }, { status: 500 });
+      }
+      if (!isAck && !isReply && state.failEdits > 0) {
         state.failEdits -= 1;
         return Response.json({ ok: false, description: 'synthetic edit failure' }, { status: 500 });
       }
@@ -134,9 +179,29 @@ describe('Telegram callback webhook', () => {
     const telegram = stubTelegram();
 
     const response = await POST(callbackRequest());
+    const watchResponse = await POST(callbackRequest({ watch: true }));
 
     expect(response.status).toBe(500);
+    expect(watchResponse.status).toBe(500);
     expect(telegram).not.toHaveBeenCalled();
+  });
+
+  it('does not duplicate a persistent alert confirmation while repairing a failed caption edit', async () => {
+    const telegram = stubTelegram();
+    state.failEdits = 1;
+    expect((await POST(callbackRequest({ watch: true }))).status).toBe(500);
+    expect((await POST(callbackRequest({ watch: true }))).status).toBe(200);
+    expect(telegram.mock.calls.filter(([url]) => String(url).endsWith('/sendMessage'))).toHaveLength(1);
+    expect(JSON.parse(state.raw!).preferences.watchGames['1001'].threshold).toBe(5);
+  });
+
+  it('fails visibly for an unconfirmed reply without blindly sending another message', async () => {
+    const telegram = stubTelegram();
+    state.failReplies = 1;
+    expect((await POST(callbackRequest({ watch: true }))).status).toBe(500);
+    expect((await POST(callbackRequest({ watch: true }))).status).toBe(500);
+    expect(telegram.mock.calls.filter(([url]) => String(url).endsWith('/sendMessage'))).toHaveLength(1);
+    expect(JSON.parse(state.raw!).preferences.watchGames['1001'].threshold).toBe(5);
   });
 
   it('retries a failed Telegram edit without applying the preference twice', async () => {

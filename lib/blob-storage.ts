@@ -256,6 +256,10 @@ export async function hasDailyDelivery(date: string, key: string): Promise<boole
   return (await readState()).deliveryKeysByDate[date]?.includes(key) ?? false;
 }
 
+export async function hasProcessedTelegramUpdate(id: string): Promise<boolean> {
+  return (await readState()).processedTelegramUpdateIds.includes(id);
+}
+
 export async function savePreferences(prefs: Preferences): Promise<void> {
   await updatePreferencesAtomically(() => prefs);
 }

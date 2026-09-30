@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createHash } from 'node:crypto';
 import {
   buildDigestKeyboard,
   isTelegramActorAllowed,
@@ -8,6 +9,7 @@ import {
   updateDigestStatus,
 } from '@/lib/telegram';
 import { applyPreferencesAction } from '@/lib/preferences-actions';
+import { hasProcessedTelegramUpdate, updatePreferencesAtomically } from '@/lib/blob-storage';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -54,22 +56,44 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Invalid callback' });
     }
 
-    const result = await applyPreferencesAction(action, callback.id);
+    const isCaption = typeof message?.caption === 'string';
+    const content = isCaption ? message.caption : message?.text;
+    const lines = typeof content === 'string' ? content.split('\n') : [];
+    const title = (['New deal', 'Price alert', 'Message preview'].includes(lines[0]) ? lines[1] : lines[0])?.trim().slice(0, 200);
+    const result = await applyPreferencesAction({ ...action, ...(action.action === 'watch' && title ? { title } : {}) }, callback.id);
+    const baseUrl = process.env.NINTENDO_DEALS_BASE_URL || new URL(req.url).origin;
 
     await telegramRequest(botToken, 'answerCallbackQuery', {
       callback_query_id: callback.id,
-      text: result.changed
-        ? action.action === 'hide' ? 'Game hidden' : `Alert set under ${action.threshold}€`
-        : action.action === 'hide' ? 'Game is already hidden' : `Alert is already set under ${action.threshold}€`,
+      ...(action.action === 'hide' ? { text: result.changed ? 'Game hidden' : 'Game is already hidden' } : {}),
     });
 
-    const isCaption = typeof message?.caption === 'string';
-    const content = isCaption ? message.caption : message?.text;
+    if (action.action === 'watch') {
+      const replyId = createHash('sha256').update(callback.id).digest('hex');
+      const claimId = `alert-reply:${replyId}`;
+      const sentId = `alert-reply-sent:${replyId}`;
+      const claim = await updatePreferencesAtomically(current => current, claimId);
+      if (!claim.duplicate) {
+        await telegramRequest(botToken, 'sendMessage', {
+          chat_id: chatId,
+          text: result.game.watch
+            ? `${result.game.watch.title} Alert for <${result.game.watch.threshold}€ set`
+            : `${title || 'Game'} Alert is no longer set`,
+          disable_web_page_preview: true,
+          reply_markup: { inline_keyboard: [[{
+            text: 'Open game', url: buildDigestKeyboard(action.fs_id, baseUrl).inline_keyboard[0][0].url,
+          }]] },
+        });
+        await updatePreferencesAtomically(current => current, sentId);
+      } else if (!await hasProcessedTelegramUpdate(sentId)) {
+        throw new Error('Alert reply was claimed but not confirmed; review Telegram before retrying');
+      }
+    }
+
     if (typeof message?.message_id !== 'number' || typeof content !== 'string') {
       return NextResponse.json({ ok: true, changed: result.changed });
     }
 
-    const baseUrl = process.env.NINTENDO_DEALS_BASE_URL || new URL(req.url).origin;
     // Telegram returns plain text, not the original HTML. Escape it before editing.
     const text = updateDigestStatus(content, result.game)
       .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
