@@ -42,7 +42,7 @@ Initial failed checks were diagnosed and fixed: empty gallery grouping semantics
 ## Delivery Status and Remaining Gates
 
 - Local implementation and specification changes: complete. Pre-existing `AGENTS.md`, `.playwright-cli/`, and `output/` changes remain untouched and outside this feature.
-- Commit/push: authorized by the user's subsequent "do it" reply; this record captures verification before the delivery commit. Production deployment: not performed or authorized for this feature.
+- Implementation committed as `2887f228268937924ed86d96a397ad4365942821` and pushed to `origin/main`; remote hash verified. Production deployment subsequently authorized by the user's "deplot" reply and completed on 2026-09-30.
 - Production scraper/maintenance runs: not performed, including dry-runs. Only narrow public source/snapshot reads from the planning investigation were used. No hidden/watch/thinking entry, Telegram message, webhook or credential was mutated.
 - **Needs validation:** actual Safari/native-WebKit playback (no installed WebKit runtime), actual third-party trailer availability and source coverage after an authorized production enrichment run. Synthetic HLS playback was verified in local Chromium, including a forced non-native capability for the mobile player branch; this does not prove Safari or real source availability.
 - Production Future Knight media/Steam caches remain unpopulated. Deployment approval alone does not authorize a backfill. A separately authorized production media run must name the target and apply mode; inspect its additive staged output before publication.
@@ -52,3 +52,12 @@ Initial failed checks were diagnosed and fixed: empty gallery grouping semantics
 ## Reflection
 
 The correction changes description fallback only, not the existing English category/UI policy. Missing Steam/media UI was primarily absent acquisition data, so render-only fixes would not have completed the feature. The lessons are captured in the existing feature research/specification; no agent-facing rule or skill file was edited.
+
+## Production Deployment Evidence
+
+- Deployed a clean `git archive` of implementation commit `2887f22`, linked to existing project `prj_Q7P2HU6CEneLl6YDAV77WvLHKSQi`. Unrelated local files were not uploaded. No new Vercel project was created.
+- Vercel deployment `dpl_DPWJs1p39DLe24pRGLRvdjoMK3cj`: Production, Ready. URL: https://nintendo-deals-9o8cyrqt0-vozers-projects.vercel.app. Production alias https://nintendo-deals.vercel.app verified by `vercel inspect`; functions use fra1. Remote production build and TypeScript checks passed.
+- Read-only GET smoke: unauthenticated and invalid-session game deep links redirect 307 to `/login?next=%2F%3Fgame%3D3151132`; login page returns 200; authenticated homepage returns 200 and retains the game ID.
+- Authenticated `GET /api/game?fs_id=3151132` returns 200, Future Knight, `excerpt_language: en`, with the official English description. `GET /api/media` and `/api/steam` return 200, parseable maps and ETag headers.
+- CLI `list --json` was unsupported; normal `list` worked. Initial game smoke used an incorrect `id` parameter and correctly received 400; the documented `fs_id` request passed. Neither error was a production application failure.
+- No production browser mutation tests, enrichment runs, preference writes, Telegram sends or webhook changes performed. Remaining Safari/source-coverage gates above are unchanged; deployment does not populate absent media caches.
