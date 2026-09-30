@@ -5,7 +5,7 @@ import html
 import re
 import unicodedata
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urljoin
 
 from automation.content_policy import MAX_DISCOUNTED_PRICE_EUR, is_blocked_title
 
@@ -144,6 +144,9 @@ def build_digest_message(
     watch = (preferences.get("watchGames") or {}).get(fs_id)
     status = f"Alert: under {watch.get('threshold')}€" if watch else "Alert: none"
     hidden = "Yes" if fs_id in {str(value) for value in preferences.get("hiddenGames", [])} else "No"
+    store_url = str(game.get("url") or "").strip()
+    if store_url:
+        store_url = urljoin("https://www.nintendo.com/", store_url)
 
     lines = [
         f"<b>{title}</b>",
@@ -155,7 +158,7 @@ def build_digest_message(
         "",
         f"<b>Why it is here:</b> {review}",
         f"Status: Hidden {hidden}; {status}",
-        f"Store: {html.escape(str(game.get('url') or ''))}",
+        f"Store: {html.escape(store_url)}",
     ]
     return "\n".join(lines)
 

@@ -82,4 +82,4 @@ The digest contains at most ten active Nintendo Life selections and excludes hid
 
 ### BR-004: Complete Destinations
 
-Every store reference in a message is an absolute destination that can be opened directly.
+Every store reference in a message is an absolute destination that can be opened directly. Relative eShop paths are resolved against `https://www.nintendo.com/` before the message is sent.

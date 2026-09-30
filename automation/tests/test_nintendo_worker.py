@@ -84,6 +84,22 @@ class WorkerRulesTests(unittest.TestCase):
         self.assertIn("A thoughtful adventure.", text)
         self.assertNotEqual(text.strip(), "123")
 
+    def test_digest_message_makes_relative_nintendo_store_url_absolute(self):
+        text = build_digest_message(
+            game(
+                "123",
+                "Visible Pick",
+                url="/es-es/Juegos/Programas-descargables-Nintendo-Switch/Future-Knight-3151132.html",
+            ),
+            {"review": "A thoughtful adventure.", "rank": 2, "source": "nintendolife"},
+            {"hiddenGames": [], "watchGames": {}},
+        )
+
+        self.assertIn(
+            "Store: https://www.nintendo.com/es-es/Juegos/Programas-descargables-Nintendo-Switch/Future-Knight-3151132.html",
+            text,
+        )
+
     def test_keyboard_uses_deep_link_and_callback_actions(self):
         keyboard = build_inline_keyboard("123", "https://nintendo-deals.vercel.app")
 
