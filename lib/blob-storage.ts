@@ -127,6 +127,7 @@ async function readState(): Promise<StoredState> {
     access: 'private',
     token: getToken(),
     useCache: false,
+    headers: { 'Accept-Encoding': 'identity' },
   });
   if (!result) {
     return {

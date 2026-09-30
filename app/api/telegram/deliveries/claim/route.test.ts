@@ -4,12 +4,13 @@ import { NextRequest } from 'next/server';
 const blobStore = vi.hoisted(() => ({ raw: null as string | null, revision: 0 }));
 
 vi.mock('@vercel/blob', () => ({
-  get: async () => {
+  get: async (_pathname: string, options: { headers?: Record<string, string> }) => {
     if (blobStore.raw === null) return null;
     return {
       statusCode: 200,
       stream: new Response(blobStore.raw).body,
-      blob: { etag: String(blobStore.revision) },
+      blob: { etag: options.headers?.['Accept-Encoding'] === 'identity'
+        ? String(blobStore.revision) : `W/"${blobStore.revision}"` },
     };
   },
   put: async (_pathname: string, body: string, options: Record<string, unknown>) => {
@@ -47,6 +48,20 @@ beforeEach(() => {
 });
 
 describe('daily Telegram delivery claim', () => {
+  it('claims against existing preferences with a strong ETag and preserves all lists', async () => {
+    const preferences = {
+      hiddenGames: ['1001'],
+      watchGames: { '1002': { title: 'Watched game', threshold: 5 } },
+      thinkingAbout: ['1003'],
+    };
+    blobStore.raw = JSON.stringify(preferences);
+    blobStore.revision = 1;
+    const response = await POST(request({ date: '2026-09-30', key: 'digest:1004' }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ claimed: true });
+    expect(JSON.parse(blobStore.raw!).preferences).toEqual(preferences);
+  });
+
   it('claims a message once per date, including concurrent replays', async () => {
     const [first, second] = await Promise.all([
       POST(request({ date: '2026-09-28', key: 'digest:1001' })),

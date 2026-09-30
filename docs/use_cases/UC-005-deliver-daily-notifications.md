@@ -83,3 +83,7 @@ The digest contains at most ten active Nintendo Life selections and excludes hid
 ### BR-004: Complete Destinations
 
 Every store reference in a message is an absolute destination that can be opened directly. Relative eShop paths are resolved against `https://www.nintendo.com/` before the message is sent.
+
+### BR-005: Preserve Preferences During Delivery Claims
+
+Delivery claims preserve hidden, watched, and thinking preferences. Conditional preference writes use the strong ETag from an uncompressed origin read; weak ETags from compressed responses cannot be used for write preconditions.
