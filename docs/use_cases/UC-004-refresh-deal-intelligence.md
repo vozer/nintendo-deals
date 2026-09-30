@@ -86,6 +86,8 @@ Provider requests use explicit timeouts, bounded retries, and documented rate li
 
 Rating refresh selects missing entries and existing entries for games released less than two months ago. Once a game is at least two months old, its first successful IGDB match is retained without routine refresh.
 
+Ratings publication accepts both historical percentage match confidence (0–100) and worker fraction confidence (0–1). Existing values are preserved without migration; confidence outside 0–100 is rejected.
+
 ### BR-005: Original Switch Scope
 
 Catalog processing includes original Nintendo Switch games and explicitly excludes records tagged as Nintendo Switch 2.

@@ -35,7 +35,7 @@ export function isRatingsSnapshot(value: unknown): value is RatingsMap {
       && Number.isSafeInteger(raw.rating_count) && Number(raw.rating_count) >= 0
       && Number.isSafeInteger(raw.aggregated_rating_count) && Number(raw.aggregated_rating_count) >= 0
       && typeof raw.matched_title === 'string' && raw.matched_title.trim().length > 0
-      && typeof raw.confidence === 'number' && raw.confidence >= 0 && raw.confidence <= 1
+      && typeof raw.confidence === 'number' && raw.confidence >= 0 && raw.confidence <= 100
       && typeof raw.last_updated === 'string'
       && (raw.release_date === undefined || raw.release_date === null || typeof raw.release_date === 'string');
   });

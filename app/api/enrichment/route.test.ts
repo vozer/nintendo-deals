@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
-const store = vi.hoisted(() => ({ saved: [] as string[], failRead: false }));
+const store = vi.hoisted(() => ({ saved: [] as string[], failRead: false, savedRatings: null as unknown }));
 
 vi.mock('@/lib/ratings-storage', () => ({
   getRatings: async () => { if (store.failRead) throw new Error('read failed'); return {}; },
-  saveRatings: async () => { store.saved.push('ratings'); },
+  saveRatings: async (ratings: unknown) => { store.saved.push('ratings'); store.savedRatings = ratings; },
 }));
 vi.mock('@/lib/media-storage', () => ({
   getMedia: async () => { if (store.failRead) throw new Error('read failed'); return {}; },
@@ -31,10 +31,26 @@ function request(path: string, body: unknown, apiKey = 'test-key') {
 beforeEach(() => {
   store.saved = [];
   store.failRead = false;
+  store.savedRatings = null;
   process.env.RATINGS_API_KEY = 'test-key';
 });
 
 describe('enrichment snapshot API boundaries', () => {
+  it('publishes mixed historical and worker confidence without changing existing values', async () => {
+    const legacy = {
+      igdb_id: 10, total_rating: 80, aggregated_rating: null, rating: 80,
+      rating_count: 3, aggregated_rating_count: 0, matched_title: 'Game', confidence: 100,
+      last_updated: '2026-09-28T10:00:00Z',
+    };
+    const rejected = await putRatings(request('ratings', { '1001': { ...legacy, confidence: 101 } }));
+    expect(rejected.status).toBe(400);
+    expect(store.saved).toHaveLength(0);
+    const snapshot = { '1001': legacy, '1002': { ...legacy, igdb_id: 11, confidence: 0.93 } };
+    const accepted = await putRatings(request('ratings', snapshot));
+    expect(accepted.status).toBe(200);
+    expect(store.savedRatings).toEqual(snapshot);
+  });
+
   it('rejects malformed maps before storage and accepts valid staged snapshots', async () => {
     const invalidRatings = await putRatings(request('ratings', { 'bad': {} }));
     const invalidMedia = await putMedia(request('media', { '1001': { screenshots: [] } }));
