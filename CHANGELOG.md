@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Locally implemented the approved game-detail upgrade: shared Hide/Unhide/Thinking/price-alert controls, truthful save/error feedback, stable dialog focus, English descriptions with Spanish fallback, and canonical Steam links independent of review scores.
+- Repaired media/Steam CLI imports and Nintendo page-URL acquisition. Manual bounded maintenance merges Nintendo/IGDB/validated Steam screenshots and multiple videos with provenance, PC labels, incomplete-state reporting, and cached-media preservation.
+- Added Chromium HLS playback through lazy-loaded pinned `hls.js` 1.7.3, with native playback and source-link fallbacks. Media/Steam snapshot writes now merge conditionally and reject stale ETags; no preference migration or production backfill was performed.
+
 - Restored the Show label on persistent confirmations and retain all available source URL buttons alongside it. New game messages keep both Steam and Nintendo Life when available, superseding the earlier replacement policy. Caption/text edits restore missing Show without dropping source buttons.
 
 - Telegram Alert actions now send persistent titled confirmations with a direct app game button instead of temporary success notifications. Preferences are saved before confirmation, replay receipts prevent duplicate confirmed replies, and existing game text/caption updates are retained.

@@ -1,4 +1,5 @@
 import { MediaMap, RatingsMap, SteamRatingsMap } from './types';
+import { mediaUrl } from './game-presentation';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -44,14 +45,25 @@ export function isRatingsSnapshot(value: unknown): value is RatingsMap {
 export function isMediaSnapshot(value: unknown): value is MediaMap {
   return isGameMap(value, (raw) => isRecord(raw)
     && Array.isArray(raw.screenshots)
-    && raw.screenshots.every(isUrl)
+    && raw.screenshots.every(mediaUrl)
     && Array.isArray(raw.videos)
     && raw.videos.every((video) => isRecord(video)
-      && typeof video.video_id === 'string'
-      && ['youtube', 'limelight'].includes(String(video.type)))
+      && typeof video.video_id === 'string' && video.video_id.length > 0
+      && ['youtube', 'limelight', 'steam'].includes(String(video.type))
+      && (video.source === undefined || ['nintendo', 'igdb', 'steam'].includes(String(video.source)))
+      && (video.type !== 'youtube' || /^[\w-]{11}$/.test(video.video_id))
+      && [video.thumbnail, video.source_url, video.content_url, video.hls_url].every((url) => url === undefined || url === '' || mediaUrl(url))
+      && (video.youtube_url === undefined || (video.type === 'youtube' && video.youtube_url === `https://www.youtube.com/embed/${video.video_id}`))
+      && (video.type !== 'steam' || (/^\d+$/.test(video.video_id) && isRecord(raw.steam_match) && video.source_url === `https://store.steampowered.com/app/${raw.steam_match.steam_id}/`)))
     && (raw.igdb_url === null || raw.igdb_url === undefined || isUrl(raw.igdb_url))
-    && ['nintendo', 'igdb'].includes(String(raw.source))
-    && typeof raw.last_updated === 'string');
+    && ['nintendo', 'igdb', 'steam', 'mixed'].includes(String(raw.source))
+    && typeof raw.last_updated === 'string'
+    && (raw.collection_complete === undefined || typeof raw.collection_complete === 'boolean')
+    && (raw.asset_sources === undefined || (isRecord(raw.asset_sources) && Object.entries(raw.asset_sources).every(([url, source]) => mediaUrl(url) && ['nintendo', 'igdb', 'steam'].includes(String(source)))))
+    && (raw.steam_match === undefined || (isRecord(raw.steam_match)
+      && Number.isSafeInteger(raw.steam_match.steam_id) && Number(raw.steam_match.steam_id) > 0
+      && typeof raw.steam_match.matched_title === 'string' && raw.steam_match.matched_title.trim().length > 0
+      && typeof raw.steam_match.publisher === 'string' && typeof raw.steam_match.last_updated === 'string')));
 }
 
 export function isSteamSnapshot(value: unknown): value is SteamRatingsMap {
@@ -59,7 +71,7 @@ export function isSteamSnapshot(value: unknown): value is SteamRatingsMap {
     && Number.isSafeInteger(raw.steam_id) && Number(raw.steam_id) > 0
     && Number.isInteger(raw.score_pct) && Number(raw.score_pct) >= 0 && Number(raw.score_pct) <= 100
     && Number.isSafeInteger(raw.votes) && Number(raw.votes) >= 0
-    && isUrl(raw.url)
+    && raw.url === `https://store.steampowered.com/app/${raw.steam_id}/`
     && typeof raw.matched_title === 'string' && raw.matched_title.trim().length > 0
     && (raw.last_updated === undefined || typeof raw.last_updated === 'string')
     && (raw.tags_updated_at === undefined || typeof raw.tags_updated_at === 'string')

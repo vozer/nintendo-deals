@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { snapshotRevision } from '@/lib/blob-json';
 
 const store = vi.hoisted(() => ({ saved: [] as string[], failRead: false, savedRatings: null as unknown }));
 
@@ -23,7 +24,7 @@ import { GET as getSteam, PUT as putSteam } from '../steam/route';
 function request(path: string, body: unknown, apiKey = 'test-key') {
   return new NextRequest(`https://nintendo-deals.test/api/${path}`, {
     method: 'PUT',
-    headers: { 'content-type': 'application/json', ...(apiKey ? { 'x-api-key': apiKey } : {}) },
+    headers: { 'content-type': 'application/json', 'if-match': snapshotRevision({}), ...(apiKey ? { 'x-api-key': apiKey } : {}) },
     body: JSON.stringify(body),
   });
 }
@@ -36,6 +37,26 @@ beforeEach(() => {
 });
 
 describe('enrichment snapshot API boundaries', () => {
+  it('requires a current starting revision for Steam publication', async () => {
+    const body = { '1001': { steam_id: 10, score_pct: 80, votes: 50, url: 'https://store.steampowered.com/app/10/', matched_title: 'Game' } };
+    const missing = request('steam', body); missing.headers.delete('if-match');
+    const stale = request('steam', body); stale.headers.set('if-match', '"stale"');
+    expect((await putSteam(missing)).status).toBe(428);
+    expect((await putSteam(stale)).status).toBe(409);
+    expect(store.saved).toEqual([]);
+  });
+  it('requires a starting revision for authenticated media publication', async () => {
+    const req = request('media', { '1001': { screenshots: [], videos: [], igdb_url: null, source: 'nintendo', last_updated: 'today' } });
+    req.headers.delete('if-match');
+    expect((await putMedia(req)).status).toBe(428);
+    expect(store.saved).toEqual([]);
+  });
+  it('rejects a stale staged media write before storage', async () => {
+    const req = request('media', { '1001': { screenshots: [], videos: [], igdb_url: null, source: 'nintendo', last_updated: 'today' } });
+    req.headers.set('if-match', '"stale"');
+    expect((await putMedia(req)).status).toBe(409);
+    expect(store.saved).toEqual([]);
+  });
   it('publishes mixed historical and worker confidence without changing existing values', async () => {
     const legacy = {
       igdb_id: 10, total_rating: 80, aggregated_rating: null, rating: 80,

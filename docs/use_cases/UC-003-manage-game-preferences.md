@@ -22,6 +22,8 @@
 4. System preserves every unrelated hidden, watched, and thinking entry.
 5. System confirms the resulting state and updates the visible list.
 
+Actions are available in both cards and detail dialogs using the same atomic endpoint. The dialog remains open when hiding removes its originating tile. Pending feedback is not saved-success feedback; failed actions expose retry and refresh authoritative state without dropping unrelated lists. Clicking the active watch threshold removes the watch. Focus returns to the original opener or a stable browse control if that opener disappears.
+
 ## Alternative Flows
 
 ### A1: Invalid Threshold
@@ -76,4 +78,3 @@ Repeating an action must be safe and must not create duplicate preference entrie
 ### BR-003: Hidden And Watched Digest Exclusion
 
 A hidden or watched game is excluded from the curated daily digest.
-

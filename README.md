@@ -1,5 +1,25 @@
 # Nintendo Deals
 
+## Game Details Upgrade (Local Implementation, 2026-09-30)
+
+- Cards and details share Hide/Unhide, Thinking, and Alert <2/<5/<10 EUR controls. Clicking the active threshold removes the alert. Save feedback waits for persistence; failures offer retry. Hiding keeps the detail dialog open.
+- Nintendo English descriptions are joined by exact game ID, cached for one hour, and requested in bounded batches. Spanish descriptions remain the fallback. Prices, Spanish store links, availability and classification stay sourced from the ES catalog.
+- Steam links also use validated media matches when review scores are unavailable. No review score is invented, and existing Nintendo Life/Nintendo links remain available.
+- Details expose every collected screenshot and selectable video, source attribution, PC labels for Steam media, image fallback, and source links for unsupported video. HLS uses native playback or lazy-loaded `hls.js`; videos do not autoplay.
+- Media/Steam writes preserve unrelated entries with Blob conditional writes. GET exposes an ETag; publication requires `If-Match` (428 if missing), and stale revisions return 409. Media accepts additive per-ID maps using the same JSON request shape, without sending the entire cache. Partial video refreshes preserve cached playback URLs.
+- Production deployment and enrichment runs require separate explicit authorization; this local implementation has not populated Future Knight's production media.
+
+### Focused Media Maintenance
+
+The existing manual maintenance workflow accepts `game_id`, `limit` (1-100), and `refresh_incomplete`. Scripts default to dry-run; dry-run retrieves and stages assets without publishing. Even production-targeted dry-runs require explicit scraper-run approval.
+
+```bash
+# Only against an explicitly authorized target; replace localhost with production only after approval.
+python3 scripts/media-backfill.py --base-url http://127.0.0.1:3100 --game-id 3151132 --limit 1 --refresh-incomplete
+```
+
+Add `--apply` only after inspecting the staged additive result and authorizing that target. Deploy the revision-aware API first. `RATINGS_API_KEY` is required for writes; IGDB credentials are optional for Nintendo/Steam-only media. Validated Steam matching checks title, edition, product type, and publisher/developer; ambiguous or mismatched candidates are omitted. IGDB acquisition is bounded at 500 screenshots/500 videos per game and reports incomplete collection at the limit or on source failures. Media browsing and enrichment never mutate preferences or send Telegram messages.
+
 A personal, password-protected web app to track Nintendo eShop deals on Switch. Fetches live data from the Nintendo Europe Solr API, displays games with prices, discounts, IGDB ratings, and lets you hide or set price watch thresholds with Telegram alerts.
 
 ## Features

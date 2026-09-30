@@ -10,6 +10,7 @@ export interface NintendoGame {
   price_has_discount_b?: boolean;
   price_sorting_f?: number;
   excerpt: string;
+  excerpt_language?: 'en' | 'es';
   url: string;
   pretty_game_categories_txt: string[];
   game_categories_txt?: string[];
@@ -61,8 +62,11 @@ export interface GameMedia {
   screenshots: string[];
   videos: GameVideo[];
   igdb_url: string | null;
-  source: 'nintendo' | 'igdb';
+  source: 'nintendo' | 'igdb' | 'steam' | 'mixed';
   last_updated: string;
+  asset_sources?: Record<string, 'nintendo' | 'igdb' | 'steam'>;
+  steam_match?: { steam_id: number; matched_title: string; publisher: string; last_updated: string };
+  collection_complete?: boolean;
 }
 
 export interface GameVideo {
@@ -71,7 +75,11 @@ export interface GameVideo {
   youtube_url?: string;
   thumbnail?: string;
   embed_url?: string;
-  type: 'youtube' | 'limelight';
+  type: 'youtube' | 'limelight' | 'steam';
+  source?: 'nintendo' | 'igdb' | 'steam';
+  source_url?: string;
+  content_url?: string;
+  hls_url?: string;
 }
 
 export type MediaMap = Record<string, GameMedia>;

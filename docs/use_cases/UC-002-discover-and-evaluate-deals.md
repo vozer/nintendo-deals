@@ -25,6 +25,8 @@
 6. System displays the game's description, price, media, ratings, source-specific editorial context, and available external review links.
 7. Shopper opens an external store or review destination or closes the detail view.
 
+Details also expose UC-003 preference actions without closing the dialog. Descriptions prefer official English copy matched by exact Nintendo ID and fall back to the Spanish Nintendo excerpt when unavailable. Cards and details retain all available source links, including Steam matches without review scores. Collected images and videos are selectable, provider-labelled, and preserve a source-link fallback for unsupported media; Steam media is labelled PC footage.
+
 ## Alternative Flows
 
 ### A1: Direct Game Link
@@ -82,4 +84,3 @@ An offer must have an actual discounted price no greater than 14.99 EUR and must
 ### BR-004: Complete Pagination
 
 The displayed collection must contain every distinct match reported by the catalog source or explicitly report that retrieval is incomplete.
-

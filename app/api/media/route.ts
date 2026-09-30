@@ -1,3 +1,4 @@
+import { snapshotRevision, SnapshotConflictError } from '@/lib/blob-json';
 import { NextRequest, NextResponse } from 'next/server';
 import { getMedia, saveMedia } from '@/lib/media-storage';
 import { isMediaSnapshot } from '@/lib/snapshot-validation';
@@ -8,7 +9,7 @@ export async function GET() {
   try {
     const media = await getMedia();
     return NextResponse.json(media, {
-      headers: { 'Cache-Control': 'no-store, max-age=0' },
+      headers: { 'Cache-Control': 'no-store, max-age=0', ETag: snapshotRevision(media) },
     });
   } catch (error) {
     console.error('Failed to fetch media:', error);
@@ -31,18 +32,15 @@ export async function PUT(req: NextRequest) {
     }
     const count = Object.keys(media).length;
 
+    const revision = req.headers.get('if-match');
+    if (!revision) return NextResponse.json({ error: 'Read the snapshot ETag and send If-Match before publishing' }, { status: 428 });
     const existing = await getMedia();
-    const existingCount = Object.keys(existing).length;
-    if (existingCount > 100 && count < existingCount * 0.5) {
-      return NextResponse.json(
-        { error: `Refusing destructive write: would drop from ${existingCount} to ${count} entries. Use x-force-overwrite: true header to override.` },
-        { status: 400 },
-      );
-    }
+    if (snapshotRevision(existing) !== revision) return NextResponse.json({ error: 'Snapshot changed; read and stage again' }, { status: 409 });
 
-    await saveMedia(media);
+    await saveMedia(media, revision);
     return NextResponse.json({ saved: count });
   } catch (error) {
+    if (error instanceof SnapshotConflictError) return NextResponse.json({ error: error.message }, { status: 409 });
     console.error('Failed to save media:', error);
     return NextResponse.json(
       { error: 'Failed to save media' },

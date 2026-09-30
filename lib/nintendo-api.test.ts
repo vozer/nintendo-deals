@@ -15,6 +15,29 @@ function mockNintendoResponse(docs: Record<string, unknown>[] = []) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Nintendo catalog requests', () => {
+  it('prefers exact-ID English copy without replacing ES prices, URLs or categories', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const english = new URL(String(input)).pathname.startsWith('/en/');
+      return Response.json({ response: { numFound: 1, docs: [english
+        ? { fs_id: '123', excerpt: 'An English adventure.', price_discounted_f: 99, url: '/en/store' }
+        : { fs_id: '123', excerpt: 'Aventura.', price_discounted_f: 4.99, url: '/es/store', pretty_game_categories_txt: ['Aventura'] }] } });
+    }));
+    const { games } = await fetchDeals({});
+    expect(games[0]).toMatchObject({ excerpt: 'An English adventure.', excerpt_language: 'en', price_discounted_f: 4.99, url: '/es/store', pretty_game_categories_txt: ['Aventura'] });
+  });
+
+  it('retains Spanish copy for missing English records, English outages and empty excerpts', async () => {
+    for (const english of [[], [{ fs_id: '123', excerpt: ' ' }], null]) {
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+        if (new URL(String(input)).pathname.startsWith('/en/')) {
+          if (english === null) throw new Error('offline');
+          return Response.json({ response: { docs: english } });
+        }
+        return Response.json({ response: { numFound: 1, docs: [{ fs_id: '123', excerpt: 'Aventura.', price_discounted_f: 4.99 }] } });
+      }));
+      expect((await fetchGameById('123'))?.excerpt).toBe('Aventura.');
+    }
+  });
   it('uses the requested offset for search pages', async () => {
     const fetchMock = mockNintendoResponse([{ fs_id: '123', price_discounted_f: 18.99 }]);
 

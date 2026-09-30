@@ -152,6 +152,8 @@ Stores the provenance and refresh state for a game's media collection.
 
 ### MEDIA_ASSET
 
+The existing media collection additionally accepts optional `steam_match` (positive app ID, exact matched title, publisher validation and refresh time), `asset_sources` (URL-to-provider mapping), per-video provider/source URL and direct/HLS playback URL, and `collection_complete`. Legacy Nintendo/IGDB entries remain readable. Steam matches provide store identity only and never synthesize rating votes or scores. Asset kinds additionally include `steam`; collections can include source `steam` or `mixed`.
+
 Represents one screenshot or video retained in a game's media collection.
 
 | Attribute | Description | Data Type | Length/Precision | Validation Rules |

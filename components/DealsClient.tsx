@@ -7,6 +7,7 @@ import { classifyGame, hasBlockedSteamTags, isHomepageDeal } from '@/lib/filters
 import { bayesianScore, computeGlobalMean, CONFIDENT_THRESHOLD, computeShovelwareScore, SHOVELWARE_THRESHOLD } from '@/lib/sort-utils';
 import GameCard from './GameCard';
 import GameDetailModal from './GameDetailModal';
+import { PreferenceFeedback } from './GamePreferenceActions';
 import SearchBar from './SearchBar';
 import SortSelect from './SortSelect';
 
@@ -59,6 +60,9 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const deepLinkHandledRef = useRef(false);
   const deepLinkLookupStartedRef = useRef(false);
+  const [preferenceFeedback, setPreferenceFeedback] = useState<Record<string, PreferenceFeedback>>({});
+  const failedActionsRef = useRef<Record<string, { payload: PreferenceActionRequest; thinkingTarget: boolean }>>({});
+  const pendingActionsRef = useRef(new Set<string>());
   const preferenceActionQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const isSearch = search.trim().length > 0;
@@ -134,14 +138,17 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
 
   const fetchPreferences = useCallback(async () => {
     try {
-      const res = await fetch('/api/preferences');
+      const res = await fetch('/api/preferences', { signal: AbortSignal.timeout(15_000) });
       if (res.ok) {
         const data = await res.json();
-        setPreferences({ ...DEFAULT_PREFS, ...data });
+        if (!Array.isArray(data.hiddenGames) || !Array.isArray(data.thinkingAbout) || !data.watchGames || typeof data.watchGames !== 'object' || Array.isArray(data.watchGames)) return null;
+        setPreferences(data);
+        return data as Preferences;
       }
     } catch {
       // continue without preferences
     }
+    return null;
   }, []);
 
   const fetchRatings = useCallback(async () => {
@@ -342,92 +349,55 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
     };
   }
 
-  function sendPreferenceAction(
-    payload: PreferenceActionRequest,
-    optimisticUpdater?: (prev: Preferences) => Preferences,
-  ) {
-    if (optimisticUpdater) {
-      setPreferences((prev) => optimisticUpdater(prev));
-    }
-
+  function sendPreferenceAction(payload: PreferenceActionRequest, thinkingTarget = !preferences.thinkingAbout.includes(payload.fs_id)) {
+    if (pendingActionsRef.current.has(payload.fs_id)) return;
+    pendingActionsRef.current.add(payload.fs_id);
+    setPreferenceFeedback((prev) => ({ ...prev, [payload.fs_id]: { pending: true } }));
     const runAction = async () => {
       try {
         const res = await fetch('/api/preferences/actions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(15_000),
         });
-        if (!res.ok) throw new Error('Failed to apply preference action');
-
-        const data = await res.json();
-        const game = data?.game as PreferenceActionGameState | undefined;
-        if (!game?.fs_id) {
-          await fetchPreferences();
+        if (!res.ok) throw new Error('Failed to save preference');
+        const game = (await res.json())?.game as PreferenceActionGameState | undefined;
+        if (!game || game.fs_id !== payload.fs_id || typeof game.hidden !== 'boolean' || !('watch' in game)) throw new Error('Invalid action response');
+        setPreferences((prev) => applyActionResult(prev, game));
+        delete failedActionsRef.current[payload.fs_id];
+        setPreferenceFeedback((prev) => ({ ...prev, [payload.fs_id]: { message: 'Saved.' } }));
+      } catch {
+        const refreshed = await fetchPreferences();
+        if (payload.action === 'toggle_thinking' && refreshed && refreshed.thinkingAbout.includes(payload.fs_id) === thinkingTarget) {
+          delete failedActionsRef.current[payload.fs_id];
+          setPreferenceFeedback((prev) => ({ ...prev, [payload.fs_id]: { message: 'Saved.' } }));
           return;
         }
-
-        setPreferences((prev) => applyActionResult(prev, game));
-      } catch {
-        await fetchPreferences();
+        failedActionsRef.current[payload.fs_id] = { payload, thinkingTarget };
+        setPreferenceFeedback((prev) => ({ ...prev, [payload.fs_id]: { error: true, message: 'Could not save. Please retry.' } }));
+      } finally {
+        pendingActionsRef.current.delete(payload.fs_id);
       }
     };
-
-    preferenceActionQueueRef.current = preferenceActionQueueRef.current
-      .catch(() => undefined)
-      .then(runAction);
+    preferenceActionQueueRef.current = preferenceActionQueueRef.current.catch(() => undefined).then(runAction);
   }
 
-  function handleHide(gameId: string) {
-    void sendPreferenceAction(
-      { action: 'hide', fs_id: gameId },
-      (prev) => ({
-        ...prev,
-        hiddenGames: prev.hiddenGames.includes(gameId) ? prev.hiddenGames : [...prev.hiddenGames, gameId],
-      }),
-    );
-  }
-
-  function handleUnhide(gameId: string) {
-    void sendPreferenceAction(
-      { action: 'unhide', fs_id: gameId },
-      (prev) => ({
-        ...prev,
-        hiddenGames: prev.hiddenGames.filter((id) => id !== gameId),
-      }),
-    );
-  }
-
-  function handleWatch(gameId: string, threshold: 2 | 5 | 10, title: string) {
-    void sendPreferenceAction(
-      { action: 'watch', fs_id: gameId, threshold, title },
-      (prev) => ({
-        ...prev,
-        watchGames: { ...prev.watchGames, [gameId]: { threshold, title } },
-      }),
-    );
-  }
-
-  function handleUnwatch(gameId: string) {
-    void sendPreferenceAction(
-      { action: 'unwatch', fs_id: gameId },
-      (prev) => {
-        const next = { ...prev, watchGames: { ...prev.watchGames } };
-        delete next.watchGames[gameId];
-        return next;
-      },
-    );
-  }
-
-  function handleThink(gameId: string) {
-    void sendPreferenceAction(
-      { action: 'toggle_thinking', fs_id: gameId },
-      (prev) => ({
-        ...prev,
-        thinkingAbout: prev.thinkingAbout.includes(gameId)
-          ? prev.thinkingAbout.filter((id) => id !== gameId)
-          : [...prev.thinkingAbout, gameId],
-      }),
-    );
+  function handleHide(gameId: string) { sendPreferenceAction({ action: 'hide', fs_id: gameId }); }
+  function handleUnhide(gameId: string) { sendPreferenceAction({ action: 'unhide', fs_id: gameId }); }
+  function handleWatch(gameId: string, threshold: 2 | 5 | 10, title: string) { sendPreferenceAction({ action: 'watch', fs_id: gameId, threshold, title }); }
+  function handleUnwatch(gameId: string) { sendPreferenceAction({ action: 'unwatch', fs_id: gameId }); }
+  function handleThink(gameId: string) { sendPreferenceAction({ action: 'toggle_thinking', fs_id: gameId }); }
+  async function retryAction(gameId: string) {
+    const failed = failedActionsRef.current[gameId];
+    if (!failed) return;
+    if (failed.payload.action === 'toggle_thinking') {
+      const refreshed = await fetchPreferences();
+      if (!refreshed) return;
+      if (refreshed.thinkingAbout.includes(gameId) === failed.thinkingTarget) {
+        delete failedActionsRef.current[gameId];
+        setPreferenceFeedback((prev) => ({ ...prev, [gameId]: { message: 'Saved.' } }));
+        return;
+      }
+    }
+    sendPreferenceAction(failed.payload, failed.thinkingTarget);
   }
 
   async function handleLogout() {
@@ -646,7 +616,7 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
               ? `${dealsGames.length} results`
               : `${dealsGames.length.toLocaleString()} deals`}
           </span>
-          <button onClick={handleLogout} className="text-white/70 hover:text-white transition-colors" title="Logout">
+          <button data-browse-focus onClick={handleLogout} className="text-white/70 hover:text-white transition-colors" title="Logout">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
           </button>
         </div>
@@ -788,10 +758,11 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
                       : (isNtDealsPick(game.fs_id) ? 'ntdeals' : null)
                   }
                   globalMean={globalMean}
-                  onHide={activeTab === 'hidden' ? handleUnhide : handleHide}
+                  onHide={preferences.hiddenGames.includes(game.fs_id) ? handleUnhide : handleHide}
                   onWatch={handleWatch}
                   onUnwatch={handleUnwatch}
-                  hideLabel={activeTab === 'hidden' ? 'Unhide' : 'Hide'}
+                  feedback={preferenceFeedback[game.fs_id]}
+                  onRetry={() => retryAction(game.fs_id)}
                   onOpenDetail={setDetailGame}
                   onThink={handleThink}
                 />
@@ -839,6 +810,13 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
       {detailGame && (
         <GameDetailModal
           game={detailGame}
+          preferences={preferences}
+          onHide={preferences.hiddenGames.includes(detailGame.fs_id) ? handleUnhide : handleHide}
+          onWatch={handleWatch}
+          onUnwatch={handleUnwatch}
+          onThink={handleThink}
+          feedback={preferenceFeedback[detailGame.fs_id]}
+          onRetry={() => retryAction(detailGame.fs_id)}
           rating={ratings[detailGame.fs_id]}
           steam={steamRatings[detailGame.fs_id]}
           media={media[detailGame.fs_id]}

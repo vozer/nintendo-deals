@@ -1,6 +1,6 @@
-import { put } from '@vercel/blob';
 import { MediaMap } from './types';
-import { readPrivateJsonMap } from './blob-json';
+import { readPrivateJsonMap, updatePrivateJsonMap } from './blob-json';
+import { mergeVideos } from './game-presentation';
 
 const MEDIA_KEY = 'media.json';
 
@@ -12,13 +12,11 @@ export async function getMedia(): Promise<MediaMap> {
   return readPrivateJsonMap<MediaMap>(MEDIA_KEY, getToken());
 }
 
-export async function saveMedia(media: MediaMap): Promise<void> {
-  await put(MEDIA_KEY, JSON.stringify(media), {
-    access: 'private',
-    contentType: 'application/json',
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    cacheControlMaxAge: 0,
-    token: getToken(),
-  });
+export async function saveMedia(media: MediaMap, revision?: string): Promise<void> {
+  await updatePrivateJsonMap(MEDIA_KEY, media, getToken(), revision, (old, next) => ({
+    ...old, ...next,
+    screenshots: [...new Set([...(old?.screenshots ?? []), ...next.screenshots])],
+    videos: mergeVideos(old?.videos ?? [], next.videos),
+    asset_sources: { ...old?.asset_sources, ...next.asset_sources },
+  }));
 }

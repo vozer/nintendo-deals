@@ -1,6 +1,5 @@
-import { put } from '@vercel/blob';
 import { SteamRatingsMap } from './types';
-import { readPrivateJsonMap } from './blob-json';
+import { readPrivateJsonMap, updatePrivateJsonMap } from './blob-json';
 
 const STEAM_KEY = 'steam_ratings.json';
 
@@ -12,13 +11,6 @@ export async function getSteamRatings(): Promise<SteamRatingsMap> {
   return readPrivateJsonMap<SteamRatingsMap>(STEAM_KEY, getToken());
 }
 
-export async function saveSteamRatings(ratings: SteamRatingsMap): Promise<void> {
-  await put(STEAM_KEY, JSON.stringify(ratings), {
-    access: 'private',
-    contentType: 'application/json',
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    cacheControlMaxAge: 0,
-    token: getToken(),
-  });
+export async function saveSteamRatings(ratings: SteamRatingsMap, revision?: string): Promise<void> {
+  await updatePrivateJsonMap(STEAM_KEY, ratings, getToken(), revision, (old, next) => ({ ...old, ...next }));
 }

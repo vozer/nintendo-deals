@@ -1,5 +1,6 @@
 import importlib.util
 from io import BytesIO
+import json
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -13,6 +14,28 @@ SPEC.loader.exec_module(steam)
 
 
 class SteamBackfillTests(unittest.TestCase):
+    def test_search_outage_is_not_an_authoritative_no_match(self):
+        with patch('urllib.request.urlopen', side_effect=urllib.error.URLError('offline')):
+            with self.assertRaisesRegex(RuntimeError, 'Steam search unavailable'):
+                steam.get_validated_steam_details({'title': 'Future Knight', 'publisher': 'Aeternum Game Studios'})
+
+    def test_tags_only_honors_game_selector_and_limit(self):
+        response = BytesIO(b'{"1":{"steam_id":1,"matched_title":"One"},"2":{"steam_id":2,"matched_title":"Two"}}')
+        response.headers = {'ETag': 'synthetic'}
+        with patch('urllib.request.urlopen', return_value=response), patch.object(steam, 'get_steamspy_tags', return_value=['Adventure']) as tags, patch.object(steam.time, 'sleep'):
+            steam.backfill_tags('https://app.test', False, 'synthetic', limit=1, game_id='2')
+        tags.assert_called_once_with(2)
+    def test_details_reject_demo_namesake_and_publisher_mismatch(self):
+        game = {'title': 'Future Knight', 'publisher': 'Aeternum Game Studios'}
+        for name, kind, publisher, accepted in [
+            ('Future Knight', 'game', 'Aeternum Game Studios', True),
+            ('Future Knight Demo', 'demo', 'Aeternum Game Studios', False),
+            ('Future Knight (CPC/Spectrum)', 'game', 'Aeternum Game Studios', False),
+            ('Future Knight', 'game', 'Unrelated Publisher', False),
+        ]:
+            response = BytesIO(json.dumps({'4235410': {'success': True, 'data': {'name': name, 'type': kind, 'publishers': [publisher], 'developers': []}}}).encode())
+            with patch('urllib.request.urlopen', return_value=response):
+                self.assertEqual(steam.get_validated_steam_details(game, 4235410) is not None, accepted)
     def test_matching_is_exact_and_does_not_cross_edition(self):
         items = [
             {"id": 1, "name": "Example Game"},

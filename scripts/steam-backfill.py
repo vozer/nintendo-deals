@@ -7,7 +7,10 @@ import re
 import os
 import sys
 import unicodedata
+from pathlib import Path
 from datetime import datetime, timezone
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from automation.content_policy import MAX_DISCOUNTED_PRICE_EUR, ORIGINAL_SWITCH_FILTER, is_original_switch_game
 
@@ -37,7 +40,7 @@ def _steam_search(query):
         with urllib.request.urlopen(req, timeout=10) as res:
             return json.loads(res.read()).get('items', [])
     except Exception:
-        return []
+        raise RuntimeError('Steam search unavailable') from None
 
 
 def _match_items(items, norm_title):
@@ -73,6 +76,27 @@ def search_steam(title):
     return None
 
 
+def get_validated_steam_details(game, appid=None):
+    title = game.get('title_master_s') or game.get('title', '')
+    appid = appid or search_steam(title)
+    if not appid or not str(appid).isdigit():
+        return None
+    url = f'https://store.steampowered.com/api/appdetails?appids={appid}&l=english&cc=es'
+    request = urllib.request.Request(url, headers={'User-Agent': 'NintendoDeals/1.0'})
+    with urllib.request.urlopen(request, timeout=15) as response:
+        result = json.loads(response.read()).get(str(appid), {})
+    details = result.get('data', {})
+    if not result.get('success') or details.get('type') != 'game':
+        return None
+    if _match_items([{'id': appid, 'name': details.get('name', '')}], normalize(title)) != appid:
+        return None
+    publisher = normalize(game.get('publisher', ''))
+    providers = {normalize(value) for value in details.get('publishers', []) + details.get('developers', [])}
+    if not publisher or publisher not in providers:
+        return None
+    return {**details, 'steam_appid': int(appid)}
+
+
 def get_steamspy_tags(appid):
     url = f"https://steamspy.com/api.php?request=appdetails&appid={appid}"
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -104,17 +128,18 @@ def get_steam_review_stats(appid):
     return None, None
 
 
-def backfill_tags(base_url, apply, api_key):
+def backfill_tags(base_url, apply, api_key, limit=25, game_id=None):
     """Add SteamSpy tags to existing entries that don't have them."""
     print("Loading existing steam ratings...")
     req = urllib.request.Request(f"{base_url}/api/steam", method='GET')
     with urllib.request.urlopen(req, timeout=30) as res:
         existing = json.loads(res.read())
+        revision = res.headers.get('ETag')
     if not isinstance(existing, dict):
         raise RuntimeError("Steam API returned an invalid snapshot")
     print(f"Loaded {len(existing)} existing ratings.")
 
-    needs_tags = [k for k, v in existing.items() if not v.get('tags')]
+    needs_tags = [k for k, v in existing.items() if not v.get('tags') and (not game_id or k == game_id)][:limit]
     print(f"Entries needing tags: {len(needs_tags)}")
 
     changed = 0
@@ -131,16 +156,18 @@ def backfill_tags(base_url, apply, api_key):
 
     print(f"Tags refreshed: {changed}")
     if apply and changed:
-        save_snapshot(base_url, api_key, existing)
+        save_snapshot(base_url, api_key, existing, revision)
     else:
         print("DRY RUN: no API writes performed." if not apply else "No changed entries to save.")
 
 
-def save_snapshot(base_url, api_key, snapshot):
+def save_snapshot(base_url, api_key, snapshot, revision=None):
+    if not revision:
+        raise RuntimeError('Target API does not expose a revision; deploy conditional writes before applying')
     request = urllib.request.Request(
         f"{base_url}/api/steam",
         data=json.dumps(snapshot).encode('utf-8'),
-        headers={'Content-Type': 'application/json', 'x-api-key': api_key},
+        headers={'Content-Type': 'application/json', 'x-api-key': api_key, **({'If-Match': revision} if revision else {})},
         method='PUT',
     )
     with urllib.request.urlopen(request, timeout=30) as response:
@@ -157,7 +184,7 @@ def fetch_games():
             'q': '*:*',
             'fq': f'type:GAME AND {ORIGINAL_SWITCH_FILTER} AND price_has_discount_b:true AND price_discounted_f:[0 TO {MAX_DISCOUNTED_PRICE_EUR}] AND language_availability:*english* AND digital_version_b:true',
             'sort': 'popularity asc', 'start': start, 'rows': rows, 'wt': 'json',
-            'fl': 'title,title_master_s,fs_id,system_type',
+            'fl': 'title,title_master_s,fs_id,system_type,publisher',
         })
         with urllib.request.urlopen(f"https://searching.nintendo-europe.com/es/select?{params}", timeout=45) as response:
             data = json.loads(response.read())
@@ -186,7 +213,11 @@ def main(argv=None):
     parser.add_argument('--base-url', help='Explicit Nintendo Deals API target; required with --apply')
     parser.add_argument('--apply', action='store_true', help='Save the staged snapshot; default is dry-run')
     parser.add_argument('--tags-only', action='store_true', help='Only fill missing SteamSpy tags')
+    parser.add_argument('--limit', type=int, default=25, help='Maximum missing games to inspect (1-100)')
+    parser.add_argument('--game-id', help='Only inspect this Nintendo ID')
     args = parser.parse_args(argv)
+    if not 1 <= args.limit <= 100 or (args.game_id and not args.game_id.isdigit()):
+        parser.error('invalid --limit or --game-id')
     if args.apply and not args.base_url:
         parser.error('--apply requires an explicit --base-url target')
     if args.apply and not API_KEY:
@@ -196,16 +227,19 @@ def main(argv=None):
     base_url = args.base_url.rstrip('/')
 
     if args.tags_only:
-        backfill_tags(base_url, args.apply, API_KEY)
+        backfill_tags(base_url, args.apply, API_KEY, args.limit, args.game_id)
         return
 
     request = urllib.request.Request(f"{base_url}/api/steam", method='GET')
     with urllib.request.urlopen(request, timeout=30) as response:
         existing = json.loads(response.read())
+        revision = response.headers.get('ETag')
     if not isinstance(existing, dict):
         raise RuntimeError("Steam API returned an invalid snapshot")
     games = fetch_games()
     updates = skipped = not_found = 0
+
+    games = [game for game in games if str(game['fs_id']) not in existing and (not args.game_id or str(game['fs_id']) == args.game_id)][:args.limit]
 
     for index, game in enumerate(games):
         fs_id = str(game['fs_id'])
@@ -213,7 +247,8 @@ def main(argv=None):
             skipped += 1
             continue
         title = game.get('title_master_s') or game.get('title')
-        appid = search_steam(title)
+        details = get_validated_steam_details(game)
+        appid = details.get('steam_appid') if details else None
         if appid:
             score, votes = get_steam_review_stats(appid)
             tags = get_steamspy_tags(appid)
@@ -236,7 +271,7 @@ def main(argv=None):
 
     print(f"Steam snapshot: {updates} new, {skipped} existing, {not_found} unmatched; total {len(existing)}")
     if args.apply and updates:
-        print('Published:', save_snapshot(base_url, API_KEY, existing))
+        print('Published:', save_snapshot(base_url, API_KEY, existing, revision))
     else:
         print('DRY RUN: no API writes performed.' if not args.apply else 'No new entries to save.')
 

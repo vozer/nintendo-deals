@@ -16,6 +16,17 @@ on:
         required: true
         default: true
         type: boolean
+      game_id:
+        description: Optional Nintendo ID for a focused Steam/media repair
+        type: string
+      limit:
+        description: Maximum games for Steam/media (1-100)
+        default: '25'
+        type: string
+      refresh_incomplete:
+        description: Revisit incomplete or legacy media entries
+        default: false
+        type: boolean
 
 concurrency:
   group: nintendo-deals-maintenance
@@ -42,6 +53,9 @@ jobs:
         env:
           OPERATION: ${{ inputs.operation }}
           DRY_RUN: ${{ inputs.dry_run }}
+          GAME_ID: ${{ inputs.game_id }}
+          LIMIT: ${{ inputs.limit }}
+          REFRESH_INCOMPLETE: ${{ inputs.refresh_incomplete }}
           NINTENDO_DEALS_BASE_URL: ${{ vars.NINTENDO_DEALS_BASE_URL }}
           RATINGS_API_KEY: ${{ secrets.RATINGS_API_KEY }}
           TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
@@ -58,6 +72,11 @@ jobs:
             *) echo "Unsupported maintenance operation" >&2; exit 2 ;;
           esac
           args=(--base-url "$NINTENDO_DEALS_BASE_URL")
+          if [[ "$OPERATION" == "steam" || "$OPERATION" == "media" ]]; then
+            args+=(--limit "$LIMIT")
+            if [[ -n "$GAME_ID" ]]; then args+=(--game-id "$GAME_ID"); fi
+          fi
+          if [[ "$OPERATION" == "media" && "$REFRESH_INCOMPLETE" == "true" ]]; then args+=(--refresh-incomplete); fi
           if [[ "$DRY_RUN" != "true" ]]; then
             : "${RATINGS_API_KEY:?RATINGS_API_KEY secret is required to publish}"
             args+=(--apply)

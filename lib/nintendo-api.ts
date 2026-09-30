@@ -39,6 +39,32 @@ const SORT_MAP: Record<SortOption, string> = {
 
 const SOLR_MAX_ROWS = 1000;
 
+async function withEnglishCopy(games: NintendoGame[]): Promise<NintendoGame[]> {
+  const english = new Map<string, string>();
+  const ids = [...new Set(games.map((game) => String(game.fs_id)).filter((id) => /^\d{1,20}$/.test(id)))].sort();
+  const readBatch = async (batch: string[]) => {
+    const params = new URLSearchParams({ q: '*', fq: `type:GAME AND ${ORIGINAL_SWITCH_FILTER} AND fs_id:(${batch.join(' OR ')})`, rows: String(batch.length), wt: 'json', fl: 'fs_id,excerpt' });
+    try {
+      const response = await fetch(`https://searching.nintendo-europe.com/en/select?${params}`, {
+        next: { revalidate: 3600 }, signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      for (const doc of data?.response?.docs ?? []) {
+        if (batch.includes(String(doc.fs_id)) && typeof doc.excerpt === 'string' && doc.excerpt.trim()) {
+          english.set(String(doc.fs_id), doc.excerpt.trim());
+        }
+      }
+    } catch {
+      // English presentation is optional; never lose Spanish offers during a source outage.
+    }
+  };
+  for (let start = 0; start < ids.length; start += 400) {
+    await Promise.all([0, 100, 200, 300].map((offset) => ids.slice(start + offset, start + offset + 100)).filter((batch) => batch.length).map(readBatch));
+  }
+  return games.map((game) => ({ ...game, excerpt: english.get(String(game.fs_id)) || game.excerpt, excerpt_language: english.has(String(game.fs_id)) ? 'en' : 'es' }));
+}
+
 export async function fetchDeals(options: {
   sort?: SortOption;
   search?: string;
@@ -72,7 +98,7 @@ export async function fetchDeals(options: {
     if (!res.ok) throw new Error(`Nintendo API error: ${res.status}`);
     const data = await res.json();
     const games = (data.response.docs as NintendoGame[]).filter(isWithinDealPriceCap);
-    return { games, total: data.response.numFound as number };
+    return { games: await withEnglishCopy(games), total: data.response.numFound as number };
   }
 
   const allGames: NintendoGame[] = [];
@@ -95,7 +121,7 @@ export async function fetchDeals(options: {
     offset += docs.length;
   }
 
-  return { games: allGames, total };
+  return { games: await withEnglishCopy(allGames), total };
 }
 
 export async function fetchGameById(fsId: string): Promise<NintendoGame | null> {
@@ -120,7 +146,7 @@ export async function fetchGameById(fsId: string): Promise<NintendoGame | null> 
 
   const data = await res.json();
   const doc = (data?.response?.docs || [])[0] as NintendoGame | undefined;
-  return doc ?? null;
+  return doc ? (await withEnglishCopy([doc]))[0] : null;
 }
 
 async function fetchSearchResults(query: string, start: number, maxRows: number): Promise<GamesResponse> {
@@ -141,5 +167,5 @@ async function fetchSearchResults(query: string, start: number, maxRows: number)
   const res = await fetch(`${NINTENDO_SOLR_URL}?${params}`, { cache: 'no-store' });
   if (!res.ok) throw new Error(`Nintendo API error: ${res.status}`);
   const data = await res.json();
-  return { games: data.response.docs as NintendoGame[], total: data.response.numFound as number };
+  return { games: await withEnglishCopy(data.response.docs as NintendoGame[]), total: data.response.numFound as number };
 }

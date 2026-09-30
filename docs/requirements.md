@@ -23,6 +23,13 @@ FR-012 is deployed: quiet initialization and preference preservation were verifi
 
 ## Non-Functional Requirements
 
+### Approved Game Detail Increment (2026-09-30)
+
+- FR-004: Cards and details prefer official English excerpts joined by exact Nintendo ID; if English is missing or fails, retain the Spanish excerpt (user-approved fallback). Spanish Nintendo prices, links, eligibility, and raw policy categories remain authoritative. Both surfaces expose canonical Steam links from validated matches, even when no review score exists. Details expose every collected screenshot and selectable playable video with provenance and source-page fallback.
+- FR-005: Detail and card controls share Hide/Unhide, fixed 2/5/10 EUR alert thresholds, remove-watch, and Thinking actions. Pending/success/error feedback reflects persistence; unrelated preferences and Telegram metadata are preserved. Hiding a game does not close its details.
+- FR-009: Manual maintenance repairs missing/incomplete media, merges Nintendo/IGDB/validated Steam assets, reports bounded/incomplete acquisition, and preserves cached assets during provider failures. Enrichment publication uses conditional writes; no new notification-path scraper.
+- NFR-008/NFR-009/NFR-010: Local synthetic tests cover 375/1200px, auth denial, preference failures, delayed enrichment, unsafe media, stale writes, multiple videos, and focus stability. No production preference mutations during verification.
+
 | ID | Title | Requirement | Category | Priority | Status |
 |---|---|---|---|---|---|
 | NFR-001 | Catalog Completeness | Every catalog-driven run must either process exactly the source-reported `numFound` distinct games or fail with an explicit incomplete-run status. | Availability | High | Verified |

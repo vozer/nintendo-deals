@@ -2,9 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
+import GamePreferenceActions, { GamePreferenceActionsProps } from './GamePreferenceActions';
+import GameVideoPlayer from './GameVideoPlayer';
+import { mediaUrl, nintendoLink, steamLink, translateCategory, releaseDate } from '@/lib/game-presentation';
 import { NintendoGame, GameRating, GameMedia, CuratedEntry, SteamRating } from '@/lib/types';
 
-interface GameDetailModalProps {
+interface GameDetailModalProps extends GamePreferenceActionsProps {
   game: NintendoGame;
   rating?: GameRating;
   steam?: SteamRating;
@@ -13,21 +16,28 @@ interface GameDetailModalProps {
   onClose: () => void;
 }
 
-export default function GameDetailModal({ game, rating, steam, media, curatedEntries = [], onClose }: GameDetailModalProps) {
+export default function GameDetailModal({ game, rating, steam, media, curatedEntries = [], onClose, ...actions }: GameDetailModalProps) {
   const [activeScreenshot, setActiveScreenshot] = useState(0);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
-  const screenshots = media?.screenshots ?? [];
-  const youtubeVideo = media?.videos?.find((v) => v.type === 'youtube');
-  const [showVideo, setShowVideo] = useState(!!youtubeVideo);
+  const screenshots = (media?.screenshots ?? []).filter(mediaUrl);
+  const videos = (media?.videos ?? []).filter((video) => video.type === 'limelight' || video.type === 'steam' || (video.type === 'youtube' && /^[\w-]{11}$/.test(video.video_id)));
+  const [activeVideo, setActiveVideo] = useState<number | null>(null);
+  const [failedImage, setFailedImage] = useState<string>();
+  const showVideo = activeVideo !== null && videos.length > 0;
+  const selectedVideo = videos[activeVideo ?? 0];
+  const imageIndex = Math.min(activeScreenshot, Math.max(0, screenshots.length - 1));
+  const imageSource = media?.asset_sources?.[screenshots[imageIndex]] ?? media?.source;
   const igdbUrl = media?.igdb_url;
-  const steamUrl = steam?.url;
-  const nintendoUrl = `https://www.nintendo.com${game.url}`;
+  const steamUrl = steamLink(steam, media);
+  const nintendoUrl = nintendoLink(game.url);
   const coverImage = game.image_url_h2x1_s || game.image_url_sq_s;
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select, video, iframe')) return;
+      if (!screenshots.length) return;
       if (e.key === 'ArrowRight' && !showVideo)
         setActiveScreenshot((i) => Math.min(i + 1, screenshots.length - 1));
       if (e.key === 'ArrowLeft' && !showVideo)
@@ -42,15 +52,19 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
     previousFocusRef.current = previousFocus;
     dialog?.showModal();
     closeButtonRef.current?.focus();
-    document.addEventListener('keydown', handleKeyDown);
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
-      document.removeEventListener('keydown', handleKeyDown);
       if (dialog?.open) dialog.close();
       document.body.style.overflow = previousOverflow;
-      previousFocusRef.current?.focus();
+      if (previousFocusRef.current?.isConnected) previousFocusRef.current.focus();
+      else document.querySelector<HTMLElement>('button[data-browse-focus]')?.focus();
     };
+  }, []);
+
+  useEffect(() => {
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
   return (
@@ -67,19 +81,14 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
       >
         {/* Media area */}
         <div className="relative w-full aspect-video bg-gray-900 rounded-t-2xl overflow-hidden">
-          {showVideo && youtubeVideo?.youtube_url ? (
-            <iframe
-              src={`${youtubeVideo.youtube_url}?autoplay=1`}
-              className="w-full h-full"
-              allow="autoplay; encrypted-media"
-              allowFullScreen
-              title={youtubeVideo.name || 'Game Trailer'}
-            />
+          {showVideo && selectedVideo ? (
+            <GameVideoPlayer key={selectedVideo.video_id} video={selectedVideo} />
           ) : screenshots.length > 0 ? (
             <>
               <Image
-                src={screenshots[activeScreenshot]}
-                alt={`${game.title} screenshot ${activeScreenshot + 1}`}
+                src={failedImage === screenshots[imageIndex] ? coverImage : screenshots[imageIndex]}
+                onError={() => setFailedImage(screenshots[imageIndex])}
+                alt={`${game.title} screenshot ${imageIndex + 1}`}
                 fill
                 sizes="(max-width: 768px) 100vw, 896px"
                 unoptimized
@@ -102,7 +111,7 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
                     aria-label="Next screenshot"
                     onClick={() => setActiveScreenshot((i) => Math.min(i + 1, screenshots.length - 1))}
                     className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white w-10 h-10 rounded-full flex items-center justify-center transition-colors disabled:opacity-30"
-                    disabled={activeScreenshot === screenshots.length - 1}
+                    disabled={imageIndex === screenshots.length - 1}
                   >
                     ›
                   </button>
@@ -145,31 +154,12 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
           </button>
         </div>
 
-        {/* Media toggle tabs + thumbnail strip */}
-        {youtubeVideo && screenshots.length > 0 && (
-          <div className="flex bg-gray-100 border-b border-gray-200">
-            <button
-              type="button"
-              onClick={() => setShowVideo(true)}
-              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors ${
-                showVideo ? 'bg-white text-[#E60012] border-b-2 border-[#E60012]' : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
-              Trailer
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowVideo(false)}
-              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors ${
-                !showVideo ? 'bg-white text-[#E60012] border-b-2 border-[#E60012]' : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="12" cy="12" r="3"/></svg>
-              Screenshots ({screenshots.length})
-            </button>
-          </div>
-        )}
+        <div role="group" className="flex flex-wrap gap-2 border-b border-gray-200 bg-gray-50 p-3" aria-label="Media selection">
+          {screenshots.length > 0 && <button type="button" aria-pressed={!showVideo} onClick={() => setActiveVideo(null)} className="rounded-lg bg-white px-3 py-2 text-sm text-gray-800">Screenshots ({screenshots.length})</button>}
+          {videos.map((video, index) => <button key={video.video_id} type="button" aria-pressed={activeVideo === index} onClick={() => setActiveVideo(index)} className="rounded-lg bg-white px-3 py-2 text-sm text-gray-800">{video.name || ('Video ' + (index + 1))}{video.source === 'steam' ? ' (PC)' : ''}</button>)}
+        </div>
+        {screenshots[imageIndex] && !showVideo && <p className="px-4 pt-2 text-xs text-gray-600">{imageSource === 'steam' ? 'Steam screenshot (PC footage)' : imageSource === 'igdb' ? 'IGDB screenshot' : imageSource === 'nintendo' ? 'Nintendo screenshot' : 'Screenshot'}</p>}
+        {media?.collection_complete === false && <p className="px-4 pt-2 text-xs text-amber-800">Some source media could not be collected. Showing available media.</p>}
 
         {!showVideo && screenshots.length > 1 && (
           <div className="flex gap-1 px-4 py-2 bg-gray-100 overflow-x-auto">
@@ -225,6 +215,9 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
               )}
             </div>
           </div>
+
+          <GamePreferenceActions game={game} {...actions} />
+          <p className="text-xs text-gray-600">{game.pretty_game_categories_txt?.map(translateCategory).join(' · ')}{releaseDate(game.pretty_date_s) ? ` · Released ${releaseDate(game.pretty_date_s)}` : ''}</p>
 
           {/* Rating */}
           {rating && rating.total_rating != null && (
@@ -342,9 +335,9 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
                 Steam Reviews
               </a>
             )}
-            {youtubeVideo && (
+            {selectedVideo?.type === 'youtube' && (
               <a
-                href={`https://www.youtube.com/watch?v=${youtubeVideo.video_id}`}
+                href={`https://www.youtube.com/watch?v=${selectedVideo.video_id}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 bg-red-600 text-white text-xs font-semibold px-3 py-2 rounded-lg hover:bg-red-700 transition-colors"

@@ -3,6 +3,8 @@
 import Image from 'next/image';
 import { NintendoGame, Preferences, GameRating, GameMedia, SteamRating } from '@/lib/types';
 import { bayesianScore } from '@/lib/sort-utils';
+import { translateCategory, steamLink, nintendoLink } from '@/lib/game-presentation';
+import GamePreferenceActions, { PreferenceFeedback } from './GamePreferenceActions';
 
 interface GameCardProps {
   game: NintendoGame;
@@ -14,23 +16,11 @@ interface GameCardProps {
   globalMean?: number;
   onHide: (gameId: string) => void;
   onWatch: (gameId: string, threshold: 2 | 5 | 10, title: string) => void;
-  hideLabel?: string;
+  feedback?: PreferenceFeedback;
+  onRetry?: () => void;
   onUnwatch?: (gameId: string) => void;
   onOpenDetail?: (game: NintendoGame) => void;
   onThink?: (gameId: string) => void;
-}
-
-const CAT_ES_TO_EN: Record<string, string> = {
-  'Acción': 'Action', 'Aventura': 'Adventure', 'Rol (RPG)': 'RPG',
-  'Puzle': 'Puzzle', 'Plataformas': 'Platformer', 'Arcade': 'Arcade',
-  'Deportes': 'Sports', 'Estrategia': 'Strategy', 'Simulación': 'Simulation',
-  'Carreras': 'Racing', 'Disparos (Shooter)': 'Shooter', 'Fiesta': 'Party',
-  'Lucha': 'Fighting', 'Música': 'Music', 'Tablero': 'Board Game',
-  'Otros': 'Other', 'Salud y forma física': 'Fitness',
-};
-
-function translateCat(cat: string): string {
-  return CAT_ES_TO_EN[cat] || cat;
 }
 
 const CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
@@ -67,9 +57,8 @@ function ratingBg(score: number): string {
   return 'bg-red-50';
 }
 
-export default function GameCard({ game, preferences, rating, steam, media, curationKind, globalMean, onHide, onWatch, hideLabel = 'Hide', onUnwatch, onOpenDetail, onThink }: GameCardProps) {
+export default function GameCard({ game, preferences, rating, steam, media, curationKind, globalMean, onHide, onWatch, feedback, onRetry, onUnwatch, onOpenDetail, onThink }: GameCardProps) {
   const isOnSale = game.price_has_discount_b !== false;
-  const watchEntry = preferences.watchGames[game.fs_id];
   
   // Calculate display score (blended if steam available)
   let bs = globalMean != null && rating
@@ -86,16 +75,19 @@ export default function GameCard({ game, preferences, rating, steam, media, cura
   }
 
   const imageUrl = game.image_url_h2x1_s || game.image_url_h16x9_s || game.image_url_sq_s;
-  const nintendoUrl = `https://www.nintendo.com${game.url}`;
-  const steamUrl = steam?.url;
+  const nintendoUrl = nintendoLink(game.url);
+  const steamUrl = steamLink(steam, media);
   const categories = (game.pretty_game_categories_txt || []).slice(0, 3);
   const hasCurationBadge = curationKind === 'nintendolife' || curationKind === 'ntdeals';
 
-  const watchThresholds: (2 | 5 | 10)[] = [2, 5, 10];
 
   return (
     <div className={`rounded-2xl overflow-hidden flex flex-col ${isOnSale ? 'bg-white' : 'bg-gray-50'}`}>
       <div
+        role="button"
+        tabIndex={0}
+        aria-label={`View details for ${game.title}`}
+        onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpenDetail?.(game); } }}
         className={`relative w-full aspect-video bg-gray-200 ${onOpenDetail || (media && media.screenshots.length > 0) ? 'cursor-pointer group' : ''}`}
         onClick={() => onOpenDetail?.(game)}
       >
@@ -149,7 +141,7 @@ export default function GameCard({ game, preferences, rating, steam, media, cura
             {steam.score_pct}% ({steam.votes >= 1000 ? (steam.votes/1000).toFixed(1) + 'k' : steam.votes})
           </div>
         )}
-        {media && (media.screenshots.length > 0 || media.videos?.some((v) => v.type === 'youtube')) && (
+        {media && (media.screenshots.length > 0 || media.videos?.some((v) => v.type === 'youtube' || v.type === 'steam')) && (
           <div className="absolute bottom-2 left-2 flex gap-1.5 opacity-70 group-hover:opacity-100 transition-opacity">
             {media.screenshots.length > 0 && (
               <span className="bg-black/60 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded flex items-center gap-1">
@@ -157,7 +149,7 @@ export default function GameCard({ game, preferences, rating, steam, media, cura
                 {media.screenshots.length}
               </span>
             )}
-            {media.videos?.some((v) => v.type === 'youtube') && (
+            {media.videos?.some((v) => v.type === 'youtube' || v.type === 'steam') && (
               <span className="bg-black/60 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded flex items-center gap-1">
                 <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
                 Trailer
@@ -176,7 +168,7 @@ export default function GameCard({ game, preferences, rating, steam, media, cura
           <span className="text-xs text-gray-500 font-medium">{game.publisher}</span>
           {categories.length > 0 && <span className="text-gray-300">·</span>}
           {categories.map((cat) => {
-            const translated = translateCat(cat);
+            const translated = translateCategory(cat);
             const color = CATEGORY_COLORS[translated] || DEFAULT_COLOR;
             return (
               <span
@@ -278,51 +270,9 @@ export default function GameCard({ game, preferences, rating, steam, media, cura
             </a>
           )}
 
-          <button
-            onClick={() => onHide(game.fs_id)}
-            className="inline-flex items-center gap-1.5 bg-gray-100 text-gray-500 text-xs font-medium px-3 py-2 rounded-lg hover:bg-gray-200 transition-colors"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>
-            {hideLabel}
-          </button>
 
-          {onThink && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onThink(game.fs_id); }}
-              className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-2 rounded-lg transition-colors ${
-                preferences.thinkingAbout?.includes(game.fs_id)
-                  ? 'bg-blue-200 text-blue-800 hover:bg-blue-300'
-                  : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
-              }`}
-              title={preferences.thinkingAbout?.includes(game.fs_id) ? 'Remove from thinking list' : 'Save to think about'}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill={preferences.thinkingAbout?.includes(game.fs_id) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>
-            </button>
-          )}
-
-          {watchThresholds.map((t) => (
-            <button
-              key={t}
-              onClick={() =>
-                watchEntry?.threshold === t && onUnwatch
-                  ? onUnwatch(game.fs_id)
-                  : onWatch(game.fs_id, t, game.title)
-              }
-              className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-2 rounded-lg transition-colors ${
-                watchEntry?.threshold === t
-                  ? 'bg-amber-200 text-amber-800 hover:bg-amber-300'
-                  : 'bg-amber-50 text-amber-600 hover:bg-amber-100'
-              }`}
-              title={
-                watchEntry?.threshold === t
-                  ? 'Remove watch'
-                  : `Watch for price below ${t}€`
-              }
-            >
-              &lt; {t}€
-            </button>
-          ))}
         </div>
+        <GamePreferenceActions game={game} preferences={preferences} onHide={onHide} onWatch={onWatch} onUnwatch={onUnwatch} onThink={onThink} feedback={feedback} onRetry={onRetry} />
       </div>
     </div>
   );

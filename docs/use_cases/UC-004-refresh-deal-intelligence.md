@@ -12,6 +12,8 @@
 
 ## Preconditions
 
+Media maintenance supports explicit game ID/limit/incomplete-entry repair with dry-run by default. It merges provider assets rather than replacing sources, retains valid cached assets on errors, validates Steam identity independently of review scoring, and publishes additive updates with conditional revision checks. Unknown/unsafe media never becomes an arbitrary embed. Acquisition stays in the existing manual maintenance workflow.
+
 - Required provider credentials are configured for the selected refresh mode.
 - A previous valid enrichment snapshot may exist.
 - Standalone refresh scripts resolve repository modules without relying on an ambient `PYTHONPATH`.
