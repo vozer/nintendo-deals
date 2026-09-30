@@ -1,7 +1,7 @@
 # Nintendo Deals System Audit And Remediation Plan
 
 **Date:** 2026-09-28  
-**Plan status:** Implemented and deployed; the first scheduled worker run and side-effecting production tests remain pending
+**Plan status:** Implemented and deployed; manual production worker and delivery verified on 2026-09-30. First execution of the corrected daily schedule remains to be observed.
 **Audited revision:** `65bc1bac57313dea8f12c04bdf141a6bdf427ff0`  
 **Evidence:** [Source audit](../research/2026-09-28-nintendo-deals-source-audit.md), [requirements](../requirements.md), [use cases](../use_cases.puml), [entity model](../entity_model.md)
 
@@ -205,7 +205,7 @@ Weekly or manual GitHub Actions
 
 ## Approval Boundary
 
-The original approval authorized implementation and local deterministic testing only. On 2026-09-29, the user separately authorized pushing to `main`, promoting to the existing production Vercel project, and read-only production HTTP smoke tests. A production worker/scraper run, preference mutation/migration, Telegram message delivery, and webhook reconfiguration remain unrun because they create persistent or irreversible effects and require a reviewed target manifest.
+The original approval authorized implementation and local deterministic testing only. On 2026-09-29, the user separately authorized pushing to `main`, promoting to the existing production Vercel project, and production testing. On 2026-09-30, after reviewing the run manifest, the user authorized the real production workflow provided existing hidden and watchlist items were preserved. The manual worker, source publication, ratings publication, delivery claims, and Telegram delivery were exercised under that condition; before/after comparisons confirmed every public preference field was preserved. No preference migration or webhook reconfiguration was performed.
 
 ## Implementation And Release Evidence
 
@@ -217,4 +217,16 @@ The original approval authorized implementation and local deterministic testing 
 - Production release: commit `aea260a` was pushed to `main`; Vercel production deployment `dpl_5EWzyFk1y5BK3pVqwyrGCXArE3Ap` is Ready and aliased to `https://nintendo-deals.vercel.app`.
 - Production HTTP checks: deep-link login redirect preserved `/?game=1337462`; login returned 200; protected catalog/game APIs redirected to login; curated, ratings, media, and Steam GET APIs returned 200; unauthenticated preference/action writes returned 401.
 - Worker configuration: GitHub repository variable `NINTENDO_DEALS_BASE_URL` is configured to the canonical public app URL; the workflow reads it as a variable, not a secret.
-- Not exercised: a live GitHub Actions schedule/worker run, source snapshot publication, production preference writes/migration, real Telegram delivery/callback, or webhook reconfiguration. The worker can overwrite production snapshots and send irreversible messages; these require a specific reviewed run manifest and approval. The next daily schedule is the first natural end-to-end worker check.
+- Remaining validation: first natural execution of the corrected 10:07 Europe/Madrid schedule. Telegram callbacks are covered by local contract tests; no production hide/watch callback was executed during this run, preserving the user's lists. No preference migration or webhook reconfiguration was necessary.
+
+### 2026-09-30 Real Production Worker Verification
+
+- Run `36721681237` published 34 Nintendo Life entries but failed before delivery because existing rating records used percentage confidence (`100`) while the validator accepted fractions only. Commit `c5b7ed6` preserves both historical 0–100 and worker 0–1 values, with an API contract test accepting a mixed snapshot unchanged and rejecting confidence above 100.
+- Run `36722686196` added 89 missing ratings, then failed at the first delivery claim. Runtime logs and read-only Blob checks showed Brotli-compressed reads returned weak ETags (`W/"…"`) while conditional writes required the strong ETag. Commit `b785bad` requests uncompressed preference reads; its regression test reproduces the failure against populated lists and verifies a successful claim preserves all lists.
+- Both failures were diagnosed before retrying. All public preferences were compared against the original snapshot after each failure.
+- Final production deployment `dpl_6CwRKp97Y1nybDDzmDqhhVRQDUV2` is Ready and aliased to `https://nintendo-deals.vercel.app`; deployed code commit is `b785bad`.
+- Real workflow [36723517685](https://github.com/vozer/nintendo-deals/actions/runs/36723517685) completed successfully at 15:43 Europe/Madrid. Its redacted artifact reports 2,938 catalog deals, 2,947 records after watched-ID lookups, 34 Nintendo Life selections, 488 NT Deals entries, 84 additional rating records, 10 digest candidates, 10 Telegram messages sent, and zero price-alert candidates/messages.
+- Final public API comparison: 157 hidden games, 10 watched games with identical titles/thresholds, and 4 thinking items were exactly preserved. NT Deals was unchanged. Ratings increased from 2,281 to 2,454 across the two publication attempts, with zero changes to any pre-existing rating record.
+- Read-only private Blob verification confirmed all ten September 30 digest keys were present. Replaying an existing production delivery claim returned `200 {"claimed":false}` and left preferences unchanged. Anonymous ratings writes returned 401. The game deep link retained its query through the 307 login redirect; the login page returned 200; unauthenticated delivery claims and webhook requests returned 401.
+- Final local gates: 40 Vitest tests, ESLint, TypeScript, production build, AIUP checker, and diff hygiene passed. Python worker behavior is unchanged by the two API fixes; its preceding 35-test suite passed.
+- Test-contract lesson: provider fixtures must cover historical data units and transport metadata, not only synthetic current values. The two production failures now have regression coverage at their existing API boundaries.
