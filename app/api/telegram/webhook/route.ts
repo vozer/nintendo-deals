@@ -62,6 +62,13 @@ export async function POST(req: NextRequest) {
     const title = (['New deal', 'Price alert', 'Message preview'].includes(lines[0]) ? lines[1] : lines[0])?.trim().slice(0, 200);
     const result = await applyPreferencesAction({ ...action, ...(action.action === 'watch' && title ? { title } : {}) }, callback.id);
     const baseUrl = process.env.NINTENDO_DEALS_BASE_URL || new URL(req.url).origin;
+    const fallbackKeyboard = buildDigestKeyboard(action.fs_id, baseUrl);
+    const originalKeyboard = message?.reply_markup?.inline_keyboard;
+    const keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> =
+      Array.isArray(originalKeyboard) && originalKeyboard.every(Array.isArray)
+        ? originalKeyboard : fallbackKeyboard.inline_keyboard;
+    const replyMarkup = { inline_keyboard: keyboard.some(row => row.some(button => button?.text === 'Show'))
+      ? keyboard : [[fallbackKeyboard.inline_keyboard[0][0]], ...keyboard] };
 
     await telegramRequest(botToken, 'answerCallbackQuery', {
       callback_query_id: callback.id,
@@ -80,9 +87,8 @@ export async function POST(req: NextRequest) {
             ? `${result.game.watch.title} Alert for <${result.game.watch.threshold}€ set`
             : `${title || 'Game'} Alert is no longer set`,
           disable_web_page_preview: true,
-          reply_markup: { inline_keyboard: [[{
-            text: 'Open game', url: buildDigestKeyboard(action.fs_id, baseUrl).inline_keyboard[0][0].url,
-          }]] },
+          reply_markup: { inline_keyboard: replyMarkup.inline_keyboard
+            .map(row => row.filter(button => typeof button?.url === 'string')).filter(row => row.length > 0) },
         });
         await updatePreferencesAtomically(current => current, sentId);
       } else if (!await hasProcessedTelegramUpdate(sentId)) {
@@ -102,7 +108,7 @@ export async function POST(req: NextRequest) {
       message_id: message.message_id,
       ...(isCaption ? { caption: text } : { text, disable_web_page_preview: true }),
       parse_mode: 'HTML',
-      reply_markup: message.reply_markup ?? buildDigestKeyboard(action.fs_id, baseUrl),
+      reply_markup: replyMarkup,
     });
 
     return NextResponse.json({ ok: true, changed: result.changed, game: result.game });

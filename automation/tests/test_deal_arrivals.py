@@ -57,7 +57,8 @@ class DailyArrivalTests(unittest.TestCase):
         self.assertEqual(len(photos), 1)
         self.assertIn('<b>New deal</b>', photos[0]['caption'])
         self.assertEqual(photos[0]['reply_markup']['inline_keyboard'][2],
-                         [{'text': 'Steam', 'url': 'https://store.steampowered.com/app/570/'}])
+                         [{'text': 'Steam', 'url': 'https://store.steampowered.com/app/570/'},
+                          {'text': 'Nintendo Life', 'url': 'https://www.nintendolife.com/reviews/test'}])
         self.assertEqual(calls[-1][1], 'PUT')
         self.assertEqual(calls[-1][2]['eligibleIds'], ['123'])
 

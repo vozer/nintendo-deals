@@ -54,7 +54,11 @@ function callbackRequest(options: { secret?: string; chatId?: number; userId?: n
         from: { id: options.userId ?? 77 },
         message: {
           message_id: 9,
-          ...(options.watch ? { caption: 'New deal\nFuture Knight\n11.99 EUR\nStatus: Hidden No; Alert: none' } : options.photo ? { caption: 'Adventure & puzzles\nStatus: Hidden No; Alert: none', reply_markup: { inline_keyboard: [[{ text: 'Nintendo', url: 'https://www.nintendo.com/game' }]] } } : { text: '<b>Example game</b>' }),
+          ...(options.watch ? { caption: 'New deal\nFuture Knight\n11.99 EUR\nStatus: Hidden No; Alert: none', reply_markup: { inline_keyboard: [[
+            { text: 'Nintendo', url: 'https://www.nintendo.com/game' },
+            { text: 'Steam', url: 'https://store.steampowered.com/app/570/' },
+            { text: 'Nintendo Life', url: 'https://www.nintendolife.com/reviews/test' },
+          ]] } } : options.photo ? { caption: 'Adventure & puzzles\nStatus: Hidden No; Alert: none', reply_markup: { inline_keyboard: [[{ text: 'Nintendo', url: 'https://www.nintendo.com/game' }]] } } : { text: '<b>Example game</b>' }),
           chat: { id: options.chatId ?? 88 },
         },
       },
@@ -109,6 +113,9 @@ describe('Telegram callback webhook', () => {
     const replies = calls.filter(call => call.url.endsWith('/sendMessage'));
     expect(replies).toHaveLength(1);
     expect(replies[0].body.text).toBe('Future Knight Alert for <5€ set');
+    expect(replies[0].body.reply_markup.inline_keyboard[0][0].text).toBe('Show');
+    expect(replies[0].body.reply_markup.inline_keyboard.flat().map((button: { text: string }) => button.text))
+      .toEqual(['Show', 'Nintendo', 'Steam', 'Nintendo Life']);
     expect(replies[0].body.reply_markup.inline_keyboard[0][0].url).toBe('https://nintendo-deals.test/?game=1001');
     for (const ack of calls.filter(call => call.url.endsWith('/answerCallbackQuery'))) expect(ack.body.text).toBeUndefined();
     expect(state.events[0]).toBe('persist');
@@ -126,7 +133,7 @@ describe('Telegram callback webhook', () => {
     const payload = JSON.parse(String(request?.body));
     expect(payload.caption).toContain('Status: Hidden Yes; Alert: none');
     expect(payload.caption).toContain('Adventure &amp; puzzles');
-    expect(payload.reply_markup.inline_keyboard[0][0].text).toBe('Nintendo');
+    expect(payload.reply_markup.inline_keyboard.flat().map((button: { text: string }) => button.text)).toEqual(['Show', 'Nintendo']);
     expect(state.events[0]).toBe('persist');
   });
   function stubTelegram() {

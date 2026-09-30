@@ -19,12 +19,12 @@
 
 ## Main Success Scenario
 
-1. Telegram user selects Show, Nintendo, Steam (preferred when available) or Nintendo Life (fallback), Hide, Alert 2 EUR, Alert 5 EUR, or Alert 10 EUR.
+1. Telegram user selects Show, Nintendo, Steam and Nintendo Life (each when available), Hide, Alert 2 EUR, Alert 5 EUR, or Alert 10 EUR.
 2. For Show, system opens the tracker at the selected game's detail view. Nintendo/Steam/Nintendo Life buttons open their source destinations without mutating preferences.
 3. For a preference action, system validates the sender, chat, action, game identifier, and threshold.
 4. System applies the action to the latest preference state.
 5. System confirms completion to Telegram only after persistence succeeds.
-   For Alert actions, send a persistent chat message such as `Future Knight Alert for <5€ set`, with an Open game button targeting `/?game=<fs_id>`. Acknowledge the callback silently to clear Telegram's spinner; do not use a temporary toast as the alert confirmation. Hide confirmations are unchanged.
+   For Alert actions, send a persistent chat message such as `Future Knight Alert for <5€ set`, with Show targeting `/?game=<fs_id>` and all source URL buttons retained. Confirmation replies omit mutating buttons. Acknowledge the callback silently to clear Telegram's spinner; do not use a temporary toast as the alert confirmation. Hide confirmations are unchanged.
 6. System edits text via `editMessageText` or photo captions via `editMessageCaption` to show the resulting hidden or alert state, retaining the existing inline keyboard and source destinations.
 
 ## Alternative Flows

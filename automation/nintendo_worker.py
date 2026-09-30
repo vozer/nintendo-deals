@@ -200,8 +200,7 @@ def build_inline_keyboard(fs_id: str, base_url: str, game: dict[str, Any] | None
     sources = []
     store = urljoin("https://www.nintendo.com/", str((game or {}).get("url") or "")) if (game or {}).get("url") else ""
     steam = steam_store_url((game or {}).get("steam_url"))
-    review = ("Steam", steam) if steam else ("Nintendo Life", (curated_entry or {}).get("source_url", ""))
-    for label, url in [("Nintendo", store), review]:
+    for label, url in [("Nintendo", store), ("Steam", steam), ("Nintendo Life", (curated_entry or {}).get("source_url", ""))]:
         if isinstance(url, str) and url.startswith("https://"):
             sources.append({"text": label, "url": url})
     if sources:
