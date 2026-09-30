@@ -9,8 +9,8 @@ on:
         default: true
         type: boolean
   schedule:
-    # GitHub cron is UTC; both candidate hours are gated to the single 10:07 Madrid run across DST.
-    - cron: '7 8,9 * * *'
+    - cron: '7 10 * * *'
+      timezone: Europe/Madrid
 
 concurrency:
   group: nintendo-deals-daily
@@ -29,19 +29,6 @@ jobs:
         with:
           python-version: '3.14.7'
 
-      - name: Check Europe/Madrid schedule window
-        id: schedule
-        if: github.event_name == 'schedule'
-        shell: bash
-        run: |
-          hour="$(TZ=Europe/Madrid date +%H)"
-          minute="$(TZ=Europe/Madrid date +%M)"
-          if [[ "$hour" == "10" && "$minute" -ge 7 && "$minute" -le 15 ]]; then
-            echo "run_worker=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run_worker=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Select run mode
         id: mode
         shell: bash
@@ -54,7 +41,7 @@ jobs:
 
       - name: Refresh Nintendo Life eShop Selects
         id: curation
-        if: github.event_name == 'workflow_dispatch' || steps.schedule.outputs.run_worker == 'true'
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
         env:
           NINTENDO_DEALS_BASE_URL: ${{ vars.NINTENDO_DEALS_BASE_URL }}
           RATINGS_API_KEY: ${{ secrets.RATINGS_API_KEY }}
@@ -71,7 +58,7 @@ jobs:
 
       - name: Run daily worker
         id: worker
-        if: github.event_name == 'workflow_dispatch' || steps.schedule.outputs.run_worker == 'true'
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
         env:
           NINTENDO_DEALS_BASE_URL: ${{ vars.NINTENDO_DEALS_BASE_URL }}
           RATINGS_API_KEY: ${{ secrets.RATINGS_API_KEY }}

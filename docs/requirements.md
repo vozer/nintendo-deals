@@ -24,7 +24,7 @@ This catalog reverse-engineers the current product and records the observable ga
 |---|---|---|---|---|---|
 | NFR-001 | Catalog Completeness | Every catalog-driven run must either process exactly the source-reported `numFound` distinct games or fail with an explicit incomplete-run status. | Availability | High | Verified |
 | NFR-002 | Preference Integrity | A failed read or concurrent action must remove zero previously stored hidden, watched, or thinking entries. | Availability | High | Verified |
-| NFR-003 | Daily Delivery Window | One scheduled run must start each calendar day between 10:00 and 10:15 Europe/Madrid, with a visible failed or completed result. | Availability | High | Open |
+| NFR-003 | Daily Delivery Window | The scheduler requests one run daily at 10:07 Europe/Madrid; if GitHub delays delivery, the run executes when delivered rather than being silently skipped, with a visible failed or completed result. | Availability | High | In Progress |
 | NFR-004 | Mutation Authorization | One hundred percent of preference, enrichment, and webhook mutations must reject missing or invalid authorization. | Security | High | Verified |
 | NFR-005 | Callback Truthfulness | A Telegram success state must be shown only after persistence succeeds, and replaying the same update must produce zero additional state changes. | Maintainability | High | Verified |
 | NFR-006 | Source Provenance | Every persisted editorial or review enrichment must include its provider, canonical source reference, and refresh timestamp. | Maintainability | High | Verified |

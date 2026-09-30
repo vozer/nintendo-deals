@@ -68,9 +68,9 @@
 
 ## Business Rules
 
-### BR-001: Daily Window
+### BR-001: Daily Schedule
 
-The scheduled run starts once per calendar day between 10:00 and 10:15 Europe/Madrid.
+The workflow declares one timezone-aware 10:07 Europe/Madrid schedule. A delayed GitHub event is processed when delivered rather than discarded by a current-time window check.
 
 ### BR-002: Alert Comparison
 
@@ -83,4 +83,3 @@ The digest contains at most ten active Nintendo Life selections and excludes hid
 ### BR-004: Complete Destinations
 
 Every store reference in a message is an absolute destination that can be opened directly.
-
