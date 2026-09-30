@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Telegram review buttons prefer cached Steam links over Nintendo Life for all game messages, including non-curated deals and watched-price alerts. Nintendo Life remains the fallback when no usable Steam match exists; the Nintendo store button is unchanged. No new Steam scraping, preferences migration or retroactive message edits are required.
+
 ### Deployed Feature - 2026-09-30
 
 - Daily game notifications now send available Nintendo title images with bounded HTML captions. Missing images use text; only definite image rejection allows text fallback, not ambiguous timeouts.

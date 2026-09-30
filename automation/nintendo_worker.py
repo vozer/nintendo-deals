@@ -5,7 +5,7 @@ import html
 import re
 import unicodedata
 from typing import Any
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urljoin, urlsplit
 
 from automation.content_policy import MAX_DISCOUNTED_PRICE_EUR, is_blocked_title
 
@@ -168,6 +168,21 @@ def build_digest_message(
     return "\n".join(lines)
 
 
+def steam_store_url(value: Any, steam_id: Any = None) -> str:
+    if isinstance(value, str):
+        url = value.strip()
+        try:
+            parsed = urlsplit(url)
+            if (parsed.scheme == "https" and parsed.netloc == "store.steampowered.com"
+                    and re.match(r"^/app/[1-9]\d*(?:/|$)", parsed.path)):
+                return url
+        except ValueError:
+            pass
+    if re.fullmatch(r"[1-9]\d*", str(steam_id or "")):
+        return f"https://store.steampowered.com/app/{steam_id}/"
+    return ""
+
+
 def build_inline_keyboard(fs_id: str, base_url: str, game: dict[str, Any] | None = None,
                           curated_entry: dict[str, Any] | None = None) -> list[list[dict[str, str]]]:
     base_url = base_url.rstrip("/")
@@ -184,7 +199,9 @@ def build_inline_keyboard(fs_id: str, base_url: str, game: dict[str, Any] | None
     ]
     sources = []
     store = urljoin("https://www.nintendo.com/", str((game or {}).get("url") or "")) if (game or {}).get("url") else ""
-    for label, url in [("Nintendo", store), ("Nintendo Life", (curated_entry or {}).get("source_url", ""))]:
+    steam = steam_store_url((game or {}).get("steam_url"))
+    review = ("Steam", steam) if steam else ("Nintendo Life", (curated_entry or {}).get("source_url", ""))
+    for label, url in [("Nintendo", store), review]:
         if isinstance(url, str) and url.startswith("https://"):
             sources.append({"text": label, "url": url})
     if sources:

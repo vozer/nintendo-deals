@@ -18,8 +18,8 @@
 
 ## Main Success Scenario
 
-1. Telegram user selects Show, Nintendo, Nintendo Life (when available), Hide, Alert 2 EUR, Alert 5 EUR, or Alert 10 EUR.
-2. For Show, system opens the tracker at the selected game's detail view. Nintendo/Nintendo Life buttons open their source destinations without mutating preferences.
+1. Telegram user selects Show, Nintendo, Steam (preferred when available) or Nintendo Life (fallback), Hide, Alert 2 EUR, Alert 5 EUR, or Alert 10 EUR.
+2. For Show, system opens the tracker at the selected game's detail view. Nintendo/Steam/Nintendo Life buttons open their source destinations without mutating preferences.
 3. For a preference action, system validates the sender, chat, action, game identifier, and threshold.
 4. System applies the action to the latest preference state.
 5. System confirms completion to Telegram only after persistence succeeds.

@@ -8,7 +8,7 @@ from automation.run_daily import run
 
 
 class DailyArrivalTests(unittest.TestCase):
-    def execute(self, initialized=True, fail_photo=False, already_claimed=False, confirmed=True):
+    def execute(self, initialized=True, fail_photo=False, already_claimed=False, confirmed=True, curated=True):
         calls = []
         game = {"fs_id": "123", "title": "Adventure", "price_discounted_f": 4.99,
                 "price_has_discount_b": True, "system_type": ["nintendoswitch"],
@@ -23,9 +23,11 @@ class DailyArrivalTests(unittest.TestCase):
             elif url.endswith('/api/preferences'):
                 response = {"hiddenGames": [], "watchGames": {}, "thinkingAbout": []}
             elif url.endswith('/api/curated'):
-                response = {"nintendolife": {"123": {"source": "nintendolife", "review": "Excellent"}}, "ntdeals": {}}
+                response = {"nintendolife": {"123": {"source": "nintendolife", "review": "Excellent", "source_url": "https://www.nintendolife.com/reviews/test"}} if curated else {}, "ntdeals": {}}
             elif url.endswith('/api/ratings'):
                 response = {"123": {"rating_count": 100}}
+            elif url.endswith('/api/steam'):
+                response = {"123": {"steam_id": 570}}  # A cached match can supply the canonical URL.
             elif url.endswith('/api/telegram/deals'):
                 response = {"eligibleIds": ["123"], "newIds": ["123"] if initialized else [], "etag": '1' if initialized else None, "initialized": initialized}
             elif '/deliveries/claim' in url:
@@ -54,8 +56,16 @@ class DailyArrivalTests(unittest.TestCase):
         photos = [body for url, _, body in calls if url.endswith('/sendPhoto')]
         self.assertEqual(len(photos), 1)
         self.assertIn('<b>New deal</b>', photos[0]['caption'])
+        self.assertEqual(photos[0]['reply_markup']['inline_keyboard'][2],
+                         [{'text': 'Steam', 'url': 'https://store.steampowered.com/app/570/'}])
         self.assertEqual(calls[-1][1], 'PUT')
         self.assertEqual(calls[-1][2]['eligibleIds'], ['123'])
+
+    def test_noncurated_arrival_gets_cached_steam_button_too(self):
+        calls = self.execute(curated=False)
+        photo = next(body for url, _, body in calls if url.endswith('/sendPhoto'))
+        self.assertEqual(photo['reply_markup']['inline_keyboard'][2][0]['text'], 'Steam')
+        self.assertTrue(any(url.endswith('/api/steam') for url, _, _ in calls))
 
     def test_first_snapshot_baselines_and_failed_or_ambiguous_send_does_not_advance_it(self):
         baseline = self.execute(initialized=False)

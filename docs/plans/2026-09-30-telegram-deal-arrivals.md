@@ -32,3 +32,10 @@
 ## Reflection
 
 The repeated confusion was terminology: existing "price alerts" meant watched thresholds, not newly eligible offers. Distinct `price_alerts` and `new_deals` run metrics now make that difference explicit. This was a product behavior gap, not a workspace-rule gap; no agent instructions were changed. The unrelated pre-existing AGENTS.md change and local browser output remain untouched.
+
+## Follow-Up: Steam Review Button Preference
+
+- All new game messages (arrivals, watched alerts, curated digests) prefer a cached Steam destination instead of Nintendo Life. Without a usable Steam match, Nintendo Life remains the fallback; Nintendo's store button and all preference actions are unchanged. Existing Telegram messages are not retroactively edited.
+- The worker reads `/api/steam` once and attaches matched destinations by Nintendo ID, including direct watched-game lookups. It accepts HTTPS Steam app URLs or constructs a canonical app URL from an existing positive Steam ID. It neither searches Steam by title nor changes game eligibility, curation or preferences.
+- Verification: 44 Python tests, 45 TypeScript tests, TypeScript checking and AIUP/diff hygiene passed. Outgoing-message and mocked-HTTP worker tests cover curated/non-curated cases, app-ID fallback and invalid-URL fallback. Read-only production data contained 1,335 usable cached destinations; button construction was checked for curated ID 2888529 and non-curated ID 1204623.
+- This is a Python worker/documentation change only. No Vercel route, frontend or dependencies changed; the prior build/browser release evidence remains applicable. No new production scraper run, Telegram message, webhook update or preference write was performed. Pushing activates the change for future GitHub Actions executions; no separate Vercel deployment is necessary.

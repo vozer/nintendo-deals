@@ -5,6 +5,25 @@ from automation import run_daily
 
 
 class TelegramDeliveryTests(unittest.TestCase):
+    def test_steam_review_button_replaces_nintendo_life_for_curated_and_noncurated_games(self):
+        for curated in [{"source_url": "https://www.nintendolife.com/reviews/test"}, {}]:
+            game = {"fs_id": "123", "title": "Adventure", "url": "/es-es/game.html",
+                    "steam_url": "https://store.steampowered.com/app/570/"}
+            with patch.object(run_daily, "telegram_request") as send:
+                run_daily.send_game_message("synthetic", "88", game, curated, {}, "https://app.test")
+            buttons = send.call_args.args[2]["reply_markup"]["inline_keyboard"][2]
+            self.assertEqual(buttons, [
+                {"text": "Nintendo", "url": "https://www.nintendo.com/es-es/game.html"},
+                {"text": "Steam", "url": "https://store.steampowered.com/app/570/"},
+            ])
+
+    def test_invalid_steam_destination_keeps_nintendo_life_fallback(self):
+        game = {"fs_id": "123", "title": "Adventure", "steam_url": "https://example.test/app/570/"}
+        with patch.object(run_daily, "telegram_request") as send:
+            run_daily.send_game_message("synthetic", "88", game, {"source_url": "https://www.nintendolife.com/reviews/test"}, {}, "https://app.test")
+        self.assertEqual(send.call_args.args[2]["reply_markup"]["inline_keyboard"][2],
+                         [{"text": "Nintendo Life", "url": "https://www.nintendolife.com/reviews/test"}])
+
     def test_photo_message_has_caption_source_buttons_and_actions(self):
         game = {"fs_id": "123", "title": "Adventure", "price_discounted_f": 4.99,
                 "image_url_h2x1_s": "https://cdn.test/title.jpg", "url": "/es-es/game.html"}

@@ -27,6 +27,7 @@ from automation.nintendo_worker import (
     is_active_deal,
     normalize_title,
     select_digest_games,
+    steam_store_url,
     title_similarity,
 )
 
@@ -554,7 +555,8 @@ def run() -> dict[str, int]:
     preferences = fetch_app_json(base_url, "/api/preferences")
     curated_sources = fetch_app_json(base_url, "/api/curated")
     ratings = fetch_app_json(base_url, "/api/ratings")
-    if not isinstance(preferences, dict) or not isinstance(curated_sources, dict) or not isinstance(ratings, dict):
+    steam = fetch_app_json(base_url, "/api/steam")
+    if not all(isinstance(snapshot, dict) for snapshot in (preferences, curated_sources, ratings, steam)):
         raise RuntimeError("One or more app APIs returned an invalid JSON object")
     curated = curated_sources.get("nintendolife")
     ntdeals = curated_sources.get("ntdeals")
@@ -562,6 +564,9 @@ def run() -> dict[str, int]:
         raise RuntimeError("Curated API must return separate Nintendo Life and NT Deals maps")
     watched_games = len(preferences.get("watchGames", {}))
     games = fetch_watched_games(games, preferences)
+    for game in games:
+        entry = steam.get(str(game["fs_id"]))
+        game["steam_url"] = steam_store_url(entry.get("url"), entry.get("steam_id")) if isinstance(entry, dict) else ""
 
     RUN_STAGE = "igdb_enrichment"
     client_id = require_env("TWITCH_CLIENT_ID")
