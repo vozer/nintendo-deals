@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Deployed Feature - 2026-09-30
+
+- Daily game notifications now send available Nintendo title images with bounded HTML captions. Missing images use text; only definite image rejection allows text fallback, not ambiguous timeouts.
+- Nintendo and available Nintendo Life links are inline buttons. Existing Show/Hide/Alert actions remain; callbacks update either text or photo captions after persistence and preserve all source buttons.
+- Added daily new-deal arrivals using the homepage's shared eligibility predicate, excluding hidden/watched/thinking games and suppressing duplicate arrivals in that run's curated digest.
+- Added authenticated comparison/conditional-commit API at `/api/telegram/deals`, independent private `telegram-deals.json` storage, and a read-only delivery-status lookup at `/api/telegram/deliveries/claim`.
+- New-arrival sends record confirmed-delivery markers. Unconfirmed replay claims stop the run; failed delivery does not advance the arrival snapshot.
+- Run summaries distinguish `eligible_deals`, `new_deals`, `new_deals_sent`, `deals_baseline_initialized`, watched `price_alerts`, and digest counts. Schedule is 10:07 Europe/Madrid, not the earlier 10:00 wording.
+- Code `c2af080` was pushed and promoted to the existing Vercel production project. Live run 36731310379 initialized 104 eligible games; a real Future Knight image preview succeeded. All 157 hidden, 10 watched and 4 thinking items were exactly preserved.
+- Verification: 45 TypeScript tests, 41 Python tests, lint/type checks/build/AIUP checks, and local Playwright at 375px and 1200px. Remaining validation and optional improvements are tracked in [the notification backlog](docs/telegram-notification-backlog.md).
+
 ### Added
 
 - Replaced the lost n8n automation with a GitHub Actions daily worker for IGDB ratings, price alerts, and one-message-per-game curated Telegram digests.

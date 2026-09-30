@@ -7,17 +7,17 @@ A personal, password-protected web app to track Nintendo eShop deals on Switch. 
 | Feature | Description |
 |---------|-------------|
 | Live deals | 2000+ Nintendo Switch games on sale, fetched on demand |
-| Price filters | Pre-filtered to 0–14.99 €, digital-only, English language |
-| IGDB ratings | Critic, user, and combined scores from IGDB (updated daily via GitHub Actions) |
+| Price filters | Original Switch only (not Switch 2), Spanish offers at 0–14.99 €, English language available |
+| IGDB ratings | Missing ratings fetched daily; successful ratings refreshed only while the Nintendo release is less than two months old |
 | Content filter | Hentai/dating titles auto-blocked; collections and sports in own tabs |
 | Hide games | Permanently hide games you're not interested in |
 | Price watch | Set < 2 €, < 5 €, or < 10 € thresholds — game hides until price drops |
-| Telegram alerts | Daily check sends notification when watched game drops below threshold |
-| 5 Tabs | Deals / Collections / Sports / Hidden / Watched |
+| Telegram notifications | Daily newly eligible Deals, watched threshold alerts, and up to ten Nintendo Life recommendations; title images, source buttons, and in-chat actions |
+| Views | Deals / Collections / Sports / Thinking / Hidden / Watched / Few Reviews / Low Quality |
 | Search | Full-text search across game titles and descriptions |
 | Sort | By popularity, discount %, price, title, rating, or best value |
 | Responsive | Mobile-first 1/2/3 column grid |
-| Password gate | Simple cookie-based auth via environment variable |
+| Password gate | Expiring signed-session cookie and bounded login attempts |
 
 ## Quick Start
 
@@ -46,7 +46,7 @@ Next.js 16 · TypeScript · Tailwind CSS · Vercel Blob · IGDB API · Nintendo 
 
 ## Automation Setup (GitHub Actions + Vercel)
 
-The daily GitHub Actions worker handles IGDB rating lookups, Telegram price alerts, and curated digest delivery. Vercel handles Telegram callback actions through a webhook:
+The daily GitHub Actions worker runs at **10:07 Europe/Madrid** (DST-aware). It handles IGDB lookups, newly eligible deal alerts, watched threshold alerts, and curated digest delivery. GitHub may delay scheduled execution; delayed events are processed rather than discarded. Vercel handles Telegram callback actions through a webhook:
 
 1. Create a Twitch app at [dev.twitch.tv](https://dev.twitch.tv/console) for IGDB API access
 2. Create a Telegram bot via @BotFather
@@ -66,7 +66,7 @@ curl "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
 |----------|----------|-------|-------------|
 | `ACCESS_PASSWORD` | Yes | Vercel | Password to access the app |
 | `BLOB_READ_WRITE_TOKEN` | Yes | Vercel | Vercel Blob token (auto-created) |
-| `RATINGS_API_KEY` | Yes | Vercel + GitHub Actions | Shared secret for ratings API |
+| `RATINGS_API_KEY` | Yes | Vercel + GitHub Actions | Automation authorization for enrichment, preferences, delivery claims and deal snapshots |
 | `TWITCH_CLIENT_ID` | Yes | GitHub Actions | IGDB API auth |
 | `TWITCH_CLIENT_SECRET` | Yes | GitHub Actions | IGDB API auth |
 | `TELEGRAM_BOT_TOKEN` | Yes | GitHub Actions + Vercel | Telegram Bot API token |
@@ -87,13 +87,33 @@ Vercel Blob ←──→ /api/ratings ←──────────┤
                                          │
                      /api/auth ←─────────┘
 
-GitHub Actions (daily, 10:00 Europe/Madrid)
+GitHub Actions (daily, 10:07 Europe/Madrid)
+  ├─→ Nintendo Life eShop Selects → curated-nintendolife.json
   ├─→ IGDB API → ratings.json → /api/ratings PUT
-  ├─→ preferences.json → price check → Telegram alert (10:00 Europe/Madrid)
-  ├─→ curated.json + preferences.json + Nintendo deals → Telegram curated digest (10:00, top 10 actionable)
+  ├─→ complete Nintendo offers → shared homepage eligibility → compare telegram-deals.json
+  ├─→ newly eligible Deals → Telegram new-deal messages
+  ├─→ preferences.json + watched-ID lookups → Telegram threshold alerts
+  ├─→ Nintendo Life selections + preferences → Telegram digest (up to 10, excluding arrivals sent that run)
+  └─→ successful delivery → conditional telegram-deals.json commit + redacted run artifact
 Vercel /api/telegram/webhook
-  └─→ Telegram callback query → /api/preferences/actions POST → edit digest message state
+  └─→ validated callback → atomic preference action → edit text/caption, retain buttons
 ```
+
+### Notification Behavior
+
+- **New deal** means a game enters or re-enters the homepage Deals selection compared with the last successful daily snapshot. It does not mean a new game release. Confidence, classification, Steam moderation and shovelware rules are shared with the homepage; hidden, watched and thinking games are excluded. Browser-local excluded Steam tags are not available to the scheduler.
+- **Price alert** means a watched game's discounted price is strictly below its 2/5/10 EUR threshold. These are independent of arrivals; zero threshold alerts can be correct even with many active offers.
+- **Curated digest** selects up to ten active Nintendo Life games, excluding hidden/watched games and that run's new arrivals. NT Deals is a separate Deal Pick signal, not Nintendo Life curation.
+- Available Nintendo title images are sent with readable, bounded HTML captions. Without an image, send text. Nintendo and available Nintendo Life links are buttons alongside Show, Hide and Alert 2/5/10 EUR.
+- The first arrival run creates a quiet baseline, not a catch-up flood. Production initialization on 2026-09-30 saved 104 eligible games. Later runs compare against that set.
+- Private `telegram-deals.json` stores arrival history independently of preferences. Daily claims and confirmed arrival-send markers live in internal Telegram metadata; public preference APIs expose only preferences.
+- Daily replay claims are at-most-once, not exactly-once guarantees. An ambiguous send is not blindly retried. See the [operational runbook and backlog](docs/telegram-notification-backlog.md).
+
+### Verification and Feature Status
+
+The image/buttons/new-arrivals feature is **implemented and deployed**. [Release evidence](docs/plans/2026-09-30-telegram-deal-arrivals.md) records the live photo preview, authenticated baseline run, unchanged preferences, and local gates. The first natural production arrival and shopper-initiated caption action remain explicit validation tasks.
+
+Local checks: `python3 -m unittest discover -s automation/tests`, `npm test`, `npm run lint`, `npx tsc --noEmit`, `npm run build`, `npm run check:aiup`, and `npm run test:e2e`. Browser tests use local synthetic data, not production preference mutations.
 
 ## License
 

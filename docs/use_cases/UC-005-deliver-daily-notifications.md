@@ -7,8 +7,9 @@
 **Primary Actor:** Daily Scheduler  
 **Secondary Actors:** Telegram Service, Deal Shopper  
 **Goal:** Deliver truthful daily price alerts and a concise editorial digest from complete current data.  
-**Status:** Implemented - audit found catalog truncation and schedule fragility  
-**Requirements:** [FR-006, FR-007, FR-010](../requirements.md)
+**Status:** Deployed; live baseline/image delivery verified, first natural arrival pending validation
+
+**Requirements:** [FR-006, FR-007, FR-010, FR-012](../requirements.md)
 
 ## Daily Deal Arrivals and Rich Messages (2026-09-30)
 
@@ -33,20 +34,23 @@ Telegram contract: [sendPhoto](https://core.telegram.org/bots/api#sendphoto), [e
 2. System retrieves the complete active Nintendo offer set and the latest valid preferences and editorial snapshot.
 3. System identifies watched games whose actual discounted price is below their threshold.
 4. System identifies up to ten active Nintendo Life selections that are neither hidden nor watched.
-5. System builds one informative message per selected game with a full store destination and available actions.
-6. System sends each price alert and digest message through Telegram.
-7. System records counts for offers, alerts, digest items, sent messages, and failures.
+5. System compares homepage-eligible games with the last successful snapshot, excluding hidden, watched and thinking games. Missing history establishes a quiet baseline.
+6. System builds image/caption messages where possible, with Nintendo and available Nintendo Life buttons and hide/watch actions.
+7. System sends new arrivals, watched threshold alerts, and up to ten digest candidates, excluding arrivals from that run's digest.
+8. System commits the new snapshot only after all delivery stages succeed.
+9. System records successful counts separately for eligible deals, new arrivals, watched alerts and digest messages; a failed run records its failure stage and duration.
 
 ## Alternative Flows
 
 ### A1: No Eligible Notification
 
-**Trigger:** No watched game meets its threshold and no editorial selection is eligible (step 4)  
+**Trigger:** No new arrival, watched threshold crossing or editorial selection is eligible
+
 **Flow:**
 
 1. System sends no game message.
 2. System records a successful run with zero eligible notifications.
-3. Use case continues at step 7.
+3. System still commits the successfully evaluated snapshot and records the run summary.
 
 ### A2: Incomplete Catalog
 
@@ -59,24 +63,26 @@ Telegram contract: [sendPhoto](https://core.telegram.org/bots/api#sendphoto), [e
 
 ### A3: Telegram Delivery Failure
 
-**Trigger:** Telegram rejects or times out while sending a message (step 6)  
+**Trigger:** Telegram rejects or times out while sending a message (step 7)
+
 **Flow:**
 
-1. System retries within the configured bound.
-2. System records the final failed message without exposing credentials.
-3. Use case continues at step 7.
+1. An explicit image-rejection response permits a text fallback; other errors stop the run without a blind resend.
+2. System records the failure stage without exposing credentials and does not advance the snapshot.
+3. Same-day replay can skip confirmed new-deal sends, but an unconfirmed claim stops for operator review. Daily claim keys alone do not prove successful delivery.
+4. See ND-001 and ND-002 in the [backlog](../telegram-notification-backlog.md) for recovery and rate-limit improvements.
 
 ## Postconditions
 
 ### Success Postconditions
 
-- Every eligible notification is sent once for the run or is explicitly counted as failed.
+- Every eligible notification is sent or skipped by the daily replay guard; detected delivery errors fail the run. A prior watched-alert or digest claim is not proof of successful delivery (ND-001).
 - Hidden and watched games do not appear in the curated digest.
 
 ### Failure Postconditions
 
 - A partial catalog does not generate a misleading digest.
-- The run history shows why delivery did not complete.
+- The run history records the failed stage; partial per-message counts are a tracked operational improvement (ND-003).
 
 ## Business Rules
 

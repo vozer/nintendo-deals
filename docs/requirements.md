@@ -17,6 +17,9 @@ This catalog reverse-engineers the current product and records the observable ga
 | FR-009 | Refresh Deal Intelligence | As a system operator, I want catalog, editorial, rating, media, and review enrichments refreshed according to explicit source policies so that displayed evidence remains current and traceable. | High | Implemented |
 | FR-010 | Operate Safely | As a system operator, I want dry-run, bounded retry, validation, and run summaries so that I can diagnose failures without mutating production data. | High | Implemented |
 | FR-011 | Explain Recommendation Source | As a deal shopper, I want Nintendo Life selections and NT Deals picks labelled separately so that I understand why a game is highlighted. | Medium | Verified |
+| FR-012 | Receive Newly Eligible Deals | As a deal shopper, I want daily alerts for games entering or re-entering the homepage Deals selection, with available title images, source buttons and actions, excluding hidden, watched and thinking games. | High | Implemented |
+
+FR-012 is deployed: quiet initialization and preference preservation were verified live; arrival/re-entry delivery and photo-caption callbacks were verified using deterministic local tests. The first naturally occurring production arrival and a shopper-initiated photo callback remain validation follow-ups, not missing implementation. See [release evidence](plans/2026-09-30-telegram-deal-arrivals.md) and [notification backlog](telegram-notification-backlog.md).
 
 ## Non-Functional Requirements
 
@@ -36,8 +39,6 @@ This catalog reverse-engineers the current product and records the observable ga
 | NFR-012 | Session Protection | Browser authentication must use an expiring signed session rather than storing the access password, and login attempts must be bounded per client within a time window. | Security | High | Verified |
 
 ## Constraints
-
-FR-012 (2026-09-30): Daily new-deal notifications compare successful complete homepage-eligible snapshots, baseline without historical flooding, exclude hidden/watched/thinking games, and preserve preferences. All daily game messages use available title images, bounded captions, source URL buttons and replay-safe caption/text actions. See UC-005.
 
 | ID | Title | Constraint | Category | Priority | Status |
 |---|---|---|---|---|---|

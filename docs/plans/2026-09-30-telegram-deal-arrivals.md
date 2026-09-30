@@ -1,5 +1,9 @@
 # Telegram Images, Source Buttons and Daily Deal Arrivals
 
+**Closeout:** Implementation complete and deployed. Documentation synchronized with README, CHANGELOG, FR-012 and UC-005/006. Open validation and improvement items are explicitly tracked as ND-001 through ND-008 in the [notification backlog](../telegram-notification-backlog.md); they are not represented as implemented or production-verified.
+
+**Affected specification IDs:** FR-006, FR-007, FR-008, FR-012; NFR-002, NFR-004, NFR-005, NFR-011; UC-005, UC-006; DAILY_DEALS_SNAPSHOT. No PR was created for this direct-to-main delivery.
+
 ## Changes
 
 - UC-005 / FR-012: available title images are sent with bounded HTML captions, source buttons and existing hide/watch actions. Text is retained when no image is available; only definite image rejection permits fallback.

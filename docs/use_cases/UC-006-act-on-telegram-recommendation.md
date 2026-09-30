@@ -7,7 +7,8 @@
 **Primary Actor:** Telegram User  
 **Secondary Actors:** Telegram Service  
 **Goal:** Open a recommended game or persist a hide or price-alert decision and receive truthful feedback in the original message.  
-**Status:** Implemented - audit found premature success feedback and replay gaps  
+**Status:** Verified with local API contracts, including photo captions and replay; live photo action awaits shopper validation
+
 **Requirements:** [FR-008](../requirements.md)
 
 ## Preconditions
@@ -17,12 +18,12 @@
 
 ## Main Success Scenario
 
-1. Telegram user selects Show, Hide, Alert 2 EUR, Alert 5 EUR, or Alert 10 EUR.
-2. For Show, system opens the tracker at the selected game's detail view.
+1. Telegram user selects Show, Nintendo, Nintendo Life (when available), Hide, Alert 2 EUR, Alert 5 EUR, or Alert 10 EUR.
+2. For Show, system opens the tracker at the selected game's detail view. Nintendo/Nintendo Life buttons open their source destinations without mutating preferences.
 3. For a preference action, system validates the sender, chat, action, game identifier, and threshold.
 4. System applies the action to the latest preference state.
 5. System confirms completion to Telegram only after persistence succeeds.
-6. System edits the full game message to show the resulting hidden or alert state.
+6. System edits text via `editMessageText` or photo captions via `editMessageCaption` to show the resulting hidden or alert state, retaining the existing inline keyboard and source destinations.
 
 ## Alternative Flows
 
@@ -89,4 +90,4 @@ Repeated delivery of one Telegram update must not create an additional state cha
 
 ### BR-004: Message Context
 
-An edited message retains the title, price, explanation, source context, store destination, and available actions.
+An edited message retains the title, price, explanation, source context, store destination, and available actions. Returned Telegram text/captions are HTML-escaped before editing. Bold styling is not reconstructed from Telegram entities (ND-007); content and destinations are preserved.
