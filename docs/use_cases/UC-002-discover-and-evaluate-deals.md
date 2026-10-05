@@ -27,6 +27,8 @@
 
 Details also expose UC-003 preference actions without closing the dialog. Descriptions prefer official English copy matched by exact Nintendo ID and fall back to the Spanish Nintendo excerpt when unavailable. Cards and details retain all available source links, including Steam matches without review scores. Collected images and videos are selectable, provider-labelled, and preserve a source-link fallback for unsupported media; Steam media is labelled PC footage.
 
+On close, focus returns to a usable opener; direct links or unavailable openers focus the game-search input. A modal without collected media omits the media-selection strip. Expired NT Deals discount context is labelled historical rather than presented as a current offer. Verified IGDB media identity is shown independently of a legacy rating association.
+
 ## Alternative Flows
 
 ### A1: Direct Game Link

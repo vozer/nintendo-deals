@@ -41,7 +41,8 @@ it('baselines then reports only newly qualifying deals without modifying prefere
     game('8', { pretty_game_categories_txt: ['Deportes'] }), game('9', { game_categories_txt: ['education', 'lifestyle'] })];
   const preview = await POST(request({ games, total: games.length }));
   const initial = await preview.json();
-  expect(initial).toEqual({ eligibleIds: ['1'], newIds: [], initialized: false, etag: null });
+  expect(initial).toMatchObject({ eligibleIds: ['1'], newIds: [], events: [], baseline: true, initialized: false,
+    offers: { '1': { active: true, price_cents: 499, episode: 1, price_change_sequence: 0 } }, etag: null });
   expect((await PUT(request({ eligibleIds: initial.eligibleIds, etag: null, date: '2026-09-30' }, 'PUT'))).status).toBe(200);
   const next = await POST(request({ games: [game('1'), game('10')], total: 2 }));
   expect((await next.json()).newIds).toEqual(['10']);
@@ -74,4 +75,35 @@ it('uses Nintendo Life trust only, respects Steam moderation, and detects re-ent
   blobs.set('steam_ratings.json', { raw: '{}', etag: '1' });
   result = await (await POST(request({ games: [game('1')], total: 1 }))).json();
   expect(result.newIds).toEqual(['1']);
+});
+
+it('baselines silently, suppresses unchanged offers, and emits price and re-entry transitions', async () => {
+  blobs.set('preferences.json', { raw: JSON.stringify({ hiddenGames: [], watchGames: {}, thinkingAbout: [] }), etag: '1' });
+  blobs.set('ratings.json', { raw: JSON.stringify({ '1': { rating_count: 100 } }), etag: '1' });
+  const snapshot = (games: ReturnType<typeof game>[]) => POST(request({ games, total: games.length }));
+  const commit = async (preview: { eligibleIds: string[]; offers: Record<string, unknown>; etag: string | null }) => PUT(request({
+    eligibleIds: preview.eligibleIds, offers: preview.offers, etag: preview.etag, date: '2026-10-04',
+  }, 'PUT'));
+
+  const first = await (await snapshot([game('1', { price_discounted_f: 4.99 })])).json();
+  expect(first.events).toEqual([]);
+  expect(first.baseline).toBe(true);
+  expect((await commit(first)).status).toBe(200);
+
+  const unchanged = await (await snapshot([game('1', { price_discounted_f: 4.99 })])).json();
+  expect(unchanged.events).toEqual([]);
+
+  const changed = await (await snapshot([game('1', { price_discounted_f: 3.99 })])).json();
+  expect(changed.events).toEqual([{ fs_id: '1', kind: 'price_changed', previous_price_cents: 499,
+    price_cents: 399, episode: 1, price_change_sequence: 1 }]);
+  expect((await commit(changed)).status).toBe(200);
+
+  const absent = await (await snapshot([])).json();
+  expect(absent.events).toEqual([]);
+  expect(absent.offers['1']).toMatchObject({ active: false, episode: 1, price_change_sequence: 1 });
+  expect((await commit(absent)).status).toBe(200);
+
+  const returned = await (await snapshot([game('1', { price_discounted_f: 3.99 })])).json();
+  expect(returned.events).toEqual([{ fs_id: '1', kind: 'reentered', previous_price_cents: 399,
+    price_cents: 399, episode: 2, price_change_sequence: 0 }]);
 });

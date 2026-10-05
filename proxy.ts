@@ -12,6 +12,7 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith('/api/media') ||
     pathname.startsWith('/api/steam') ||
     pathname.startsWith('/api/curated') ||
+    pathname.startsWith('/api/offer-end-dates') ||
     pathname.startsWith('/api/telegram')
   ) {
     return NextResponse.next();

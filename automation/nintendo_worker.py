@@ -4,8 +4,10 @@ from difflib import SequenceMatcher
 import html
 import re
 import unicodedata
+from datetime import datetime
 from typing import Any
 from urllib.parse import quote, urljoin, urlsplit
+from zoneinfo import ZoneInfo
 
 from automation.content_policy import MAX_DISCOUNTED_PRICE_EUR, is_blocked_title
 
@@ -93,13 +95,16 @@ def find_price_alerts(
         fs_id = str(raw_id)
         if not isinstance(watch, dict) or fs_id not in by_id:
             continue
+        game = by_id[fs_id]
+        if game.get("price_has_discount_b") is not True:
+            continue
         try:
             threshold = float(watch.get("threshold"))
         except (TypeError, ValueError):
             continue
-        price = _price(by_id[fs_id])
+        price = _price(game)
         if threshold in THRESHOLDS and price is not None and price < threshold:
-            alerts.append((by_id[fs_id], watch))
+            alerts.append((game, watch))
     return alerts
 
 
@@ -153,6 +158,35 @@ def build_digest_message(
     watch = (preferences.get("watchGames") or {}).get(fs_id)
     status = f"Alert: under {watch.get('threshold')}€" if watch else "Alert: none"
     hidden = "Yes" if fs_id in {str(value) for value in preferences.get("hiddenGames", [])} else "No"
+    rating_lines = []
+    igdb = game.get("igdb_rating")
+    if isinstance(igdb, dict):
+        critic = igdb.get("aggregated_rating")
+        users = igdb.get("rating")
+        pieces = []
+        if isinstance(critic, (int, float)):
+            pieces.append(f"Critic {critic:.0f}/100 ({int(igdb.get('aggregated_rating_count') or 0)})")
+        if isinstance(users, (int, float)):
+            pieces.append(f"Users {users:.0f}/100 ({int(igdb.get('rating_count') or 0)})")
+        if pieces:
+            rating_lines.append("IGDB: " + "; ".join(pieces))
+    steam = game.get("steam_rating")
+    if isinstance(steam, dict) and isinstance(steam.get("score_pct"), (int, float)):
+        votes = int(steam.get("votes") or 0)
+        rating_lines.append(f"Steam: {float(steam['score_pct']):.0f}% positive ({votes} reviews)")
+
+    offer_end = game.get("offer_end_date")
+    if isinstance(offer_end, str):
+        try:
+            parsed_end = datetime.fromisoformat(offer_end.replace("Z", "+00:00"))
+            if parsed_end.tzinfo is not None:
+                offer_end = parsed_end.astimezone(ZoneInfo("Europe/Madrid")).strftime("%d %b %Y").lstrip("0")
+            else:
+                offer_end = ""
+        except ValueError:
+            offer_end = ""
+    else:
+        offer_end = ""
 
     lines = [
         f"<b>{title}</b>",
@@ -162,6 +196,8 @@ def build_digest_message(
         "",
         f"{excerpt}",
         "",
+        *(rating_lines + ([f"Offer ends: {offer_end}"] if offer_end else [])),
+        *( [""] if rating_lines or offer_end else [] ),
         f"<b>Why it is here:</b> {review}",
         f"Status: Hidden {hidden}; {status}",
     ]

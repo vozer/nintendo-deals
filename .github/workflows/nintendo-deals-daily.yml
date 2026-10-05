@@ -89,6 +89,8 @@ jobs:
               "nintendolife_matches", "nintendolife_rejections", "rating_updates",
               "duration_seconds", "failure_stage", "games", "price_alerts", "digest_items",
               "price_alerts_sent", "digest_messages_sent", "new_deals", "new_deals_sent",
+              "price_changed_deals", "price_changed_deals_sent", "reentered_deals", "reentered_deals_sent",
+              "offer_events", "offer_messages_sent", "offer_end_dates", "offer_end_date_refresh_failed",
               "eligible_deals", "deals_baseline_initialized",
           }
           metrics = {}

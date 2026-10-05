@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { NintendoGame, Preferences, SortOption, RatingsMap, MediaMap, SteamRatingsMap, CuratedSources } from '@/lib/types';
+import { NintendoGame, Preferences, SortOption, RatingsMap, MediaMap, SteamRatingsMap, CuratedSources, OfferEndDatesSnapshot } from '@/lib/types';
 import { classifyGame, hasBlockedSteamTags, isHomepageDeal } from '@/lib/filters';
+import { currentOfferEndDate } from '@/lib/offer-end-dates';
 import { bayesianScore, computeGlobalMean, CONFIDENT_THRESHOLD, computeShovelwareScore, SHOVELWARE_THRESHOLD } from '@/lib/sort-utils';
 import GameCard from './GameCard';
 import GameDetailModal from './GameDetailModal';
@@ -16,6 +17,7 @@ type CurationKind = 'nintendolife' | 'ntdeals' | null;
 
 const DEFAULT_PREFS: Preferences = { hiddenGames: [], watchGames: {}, thinkingAbout: [] };
 const EMPTY_CURATED: CuratedSources = { nintendolife: {}, ntdeals: {} };
+const EMPTY_OFFER_ENDS: OfferEndDatesSnapshot = { checked_at: null, records: {} };
 
 interface DealsClientProps {
   initialGameId?: string;
@@ -45,6 +47,7 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
   const [media, setMedia] = useState<MediaMap>({});
   const [steamRatings, setSteamRatings] = useState<SteamRatingsMap>({});
   const [curatedSources, setCuratedSources] = useState<CuratedSources>(EMPTY_CURATED);
+  const [offerEndDates, setOfferEndDates] = useState<OfferEndDatesSnapshot>(EMPTY_OFFER_ENDS);
   const [detailGame, setDetailGame] = useState<NintendoGame | null>(null);
   const [sort, setSort] = useState<SortOption>('value');
   const [search, setSearch] = useState('');
@@ -204,6 +207,18 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
     }
   }, []);
 
+  const fetchOfferEndDates = useCallback(async () => {
+    try {
+      const res = await fetch('/api/offer-end-dates', { signal: AbortSignal.timeout(15_000) });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data || typeof data.checked_at !== 'string' || !data.records || typeof data.records !== 'object' || Array.isArray(data.records)) return;
+      setOfferEndDates({ checked_at: data.checked_at, records: data.records });
+    } catch {
+      // Offer end dates are optional and must never block catalog browsing.
+    }
+  }, []);
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void fetchMainGames();
@@ -212,9 +227,10 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
       void fetchMedia();
       void fetchSteam();
       void fetchCurated();
+      void fetchOfferEndDates();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [fetchMainGames, fetchPreferences, fetchRatings, fetchMedia, fetchSteam, fetchCurated]);
+  }, [fetchMainGames, fetchPreferences, fetchRatings, fetchMedia, fetchSteam, fetchCurated, fetchOfferEndDates]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -752,6 +768,7 @@ export default function DealsClient({ initialGameId }: DealsClientProps) {
                   rating={ratings[game.fs_id]}
                   steam={steamRatings[game.fs_id]}
                   media={media[game.fs_id]}
+                  offerEndDate={currentOfferEndDate(game, offerEndDates)}
                   curationKind={
                     isNintendoLifeCurated(game.fs_id)
                       ? 'nintendolife'

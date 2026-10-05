@@ -1,6 +1,6 @@
 # Telegram Images, Source Buttons and Daily Deal Arrivals
 
-**Closeout:** Implementation complete and deployed. Documentation synchronized with README, CHANGELOG, FR-012 and UC-005/006. Open validation and improvement items are explicitly tracked as ND-001 through ND-008 in the [notification backlog](../telegram-notification-backlog.md); they are not represented as implemented or production-verified.
+**Closeout:** The original image/button/arrival implementation is deployed. Later follow-ups record their own release state; the 2026-10-04 transition-ledger, audit, and offer-expiry increment is local and not deployed. Open validation and improvement items are tracked as ND-001 through ND-008 in the [notification backlog](../telegram-notification-backlog.md).
 
 **Affected specification IDs:** FR-006, FR-007, FR-008, FR-012; NFR-002, NFR-004, NFR-005, NFR-011; UC-005, UC-006; DAILY_DEALS_SNAPSHOT. No PR was created for this direct-to-main delivery.
 
@@ -26,7 +26,7 @@
 ## Limitations
 
 - No previous eligible-ID history exists, so retrospective arrivals cannot be reconstructed reliably. First run establishes today's baseline; subsequent successful daily runs notify new entrants.
-- A claimed but unconfirmed new-deal send stops same-day replay for operator review; it is not blindly resent after a timeout.
+- Historical implementation note: the original at-most-once behavior used same-day replay claims. It was superseded by the permanent offer-transition claim/result ledger documented below; unknown sends still stop for operator review and are never blindly resent.
 - Title images are supported; video uploading is not introduced.
 
 ## Reflection
@@ -56,3 +56,12 @@ The repeated confusion was terminology: existing "price alerts" meant watched th
 - New worker game messages retain Nintendo, Steam and Nintendo Life together when available, superseding the earlier Steam-replacement policy. Callback caption/text edits restore a missing Show button without dropping existing links. Existing messages are not bulk-rewritten; unavailable source URLs are not invented.
 - Verification: 50 TypeScript tests, 44 Python tests, lint/type/build/AIUP/diff checks and both local Playwright viewports passed. The outgoing-payload checks assert all source links coexist, and the webhook checks assert Show plus source links survive confirmation and caption editing.
 - Code `ea7cf23` was pushed and explicitly deployed as `C4tSdimvrucyovZmioAgMKG1Mm3H`, aliased to `https://nintendo-deals.vercel.app`. Exact pre/post-deployment comparison preserved all 157 hidden, 11 watched and 4 thinking items; the unauthorized webhook smoke returned 401. No production worker run or fabricated Alert click was performed. The corrected additive-link contract is captured in UC-005/006 rather than changing agent rules.
+
+## Follow-Up: Offer Transition Ledger, Audit History and Expiry (2026-10-04)
+
+- FR-013/014/015: The worker compares complete offer state, independently from preferences, and sends only a new offer, a changed discounted price, or a re-entry after an observed non-discount. Stable offers do not repeat on later days or under another notification category. A quiet first-run baseline avoids historical floods; watched games are fetched directly as a backstop, and threshold alerts require an actual discounted price.
+- Permanent transition claims and results make replay safe across dates. Confirmed sends are skipped; an unknown outcome stops for operator review. The offer snapshot advances only after the batch succeeds. Preference and hidden/watchlist state are not part of this snapshot.
+- Telegram inbound updates and outbound Bot API attempts/results are retained as immutable private audit records with recursive secret redaction and bounded API-key-protected search. The existing authenticated audit API supports UTC date, direction, kind, correlation ID, and text filters with pagination.
+- The worker reads Nintendo's official `discount_price.end_datetime` hook for exact game IDs and prices, publishes a validated short-lived snapshot, and shows the date only when it matches the current discounted price. Missing or stale dates are omitted.
+- Verification: 75 Python tests, 75 TypeScript tests, lint, typecheck, AIUP documentation check, production build, and four local Playwright cases passed. `git diff --check` passed. Tests use synthetic fixtures; no production worker, Telegram send/callback, preference write, push, or deployment was performed.
+- **Release state:** Implemented locally, not deployed. Production validation and optional improvements remain tracked as ND-002 through ND-008 in the [notification backlog](../telegram-notification-backlog.md). ND-001 describes transition-ledger behavior implemented locally; its first natural production transition remains to be verified after release.

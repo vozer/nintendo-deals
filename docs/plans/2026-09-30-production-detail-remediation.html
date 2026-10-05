@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nintendo Deals: Production Repair Approval</title>
+<style>
+:root{--red:#b80010;--ink:#20242a;--muted:#59616b;--line:#ddd8ce}*{box-sizing:border-box}body{margin:0;color:var(--ink);background:linear-gradient(140deg,#f8f3ea,#eef2f2);font:16px/1.65 Georgia,serif}main{max-width:720px;margin:36px auto;padding:0 20px 45px}h1,h2,h3,summary{font-family:Verdana,sans-serif;line-height:1.35}h1{font-size:29px}h2{font-size:20px}h3{font-size:16px}.eyebrow{color:var(--red);font:11px Verdana,sans-serif;letter-spacing:1.5px}section{background:white;border:1px solid var(--line);border-radius:12px;padding:22px;margin:20px 0}.status{border-left:4px solid var(--red);padding:12px 17px;background:#fff4ee}strong{font-weight:bold}a{color:var(--red);overflow-wrap:anywhere}code{font:13px Menlo,monospace;overflow-wrap:anywhere}li{margin:8px 0}small{color:var(--muted)}details{border-top:1px solid var(--line);margin-top:15px;padding-top:14px}summary{cursor:pointer}@media(max-width:420px){main{margin-top:20px;padding:0 14px 30px}section{padding:17px}h1{font-size:25px}}
+</style>
+<main>
+<p class="eyebrow">APPROVED 2026-10-01 / NO NEW ENRICHMENT SCHEDULE</p>
+<h1>Finish the data flow, not just the interface</h1>
+<p class="status">The deployed interface works, but ingestion is manual-only, one legacy provider match is wrong, and direct-link focus restoration is faulty. No production data was changed during this investigation.</p>
+<section><h2>Why This Happened</h2>
+<h3>1. Future Knight has no enrichment record</h3><p>Vercel deployment does not execute maintenance. The daily worker updates ratings and sends Telegram messages, but does not populate media or Steam matches. The maintenance workflow is manual-only; no retained runs are listed.</p>
+<p><strong>Approved correction:</strong> run the existing media crawler, not a new maintenance job or schedule. Media can store a validated Steam identity without inventing a review score. Full eligible catalog versus targeted production publication is being confirmed.</p>
+<h3>2. Blaster Master Zero inherited an add-on association</h3><p>Its March rating record identifies the Shantae add-on. The current matcher rejects that title pair, but the game's age freezes the existing rating record. Media acquisition still reuses its IGDB ID without identity validation. Additive merging retains old media, so blindly refreshing can keep the same wrong association. The original matching execution is unknown.</p>
+<p><strong>Fix:</strong> validate base-game type, title, Switch platform and edition before acquisition; retain raw legacy data for recovery, and distinguish it from verified presentation. Do not change frozen rating scores or delete the media map.</p>
+<h3>3. Direct links have no real opener</h3><p>The dialog captures BODY as its previous focus target. BODY is still connected, so the current fallback is skipped.</p>
+<p><strong>Fix:</strong> restore a usable opener; otherwise focus the existing game-search input. Test actual focus, not only dialog closure.</p>
+</section>
+<section><h2>Recommended Implementation Scope</h2>
+<ol><li>Fix IGDB media identity validation and recoverable legacy provenance, including ambiguous-match rejection.</li><li>Fix direct-link focus restoration; hide the empty media strip and label stale NT Deals context as historical.</li><li>Run the existing crawler with an explicit target and scope; preserve prior assets and retain old association URLs for recovery. No new job or schedule.</li><li>Run synthetic provider/API/browser checks, denied auth paths, Python tests, TypeScript, lint, build and AIUP checks. Keep preference data and Telegram unchanged.</li></ol>
+<p><strong>Code approval does not activate production scraping or publish new records.</strong></p>
+<details><summary>Operational Boundaries</summary><ol><li>Deploy reviewed code to the existing Vercel project only with release approval.</li><li>The previously proposed staging scope is exactly <code>3151132</code> and <code>1204623</code> against <code>https://nintendo-deals.vercel.app</code>, without publication.</li><li>Confirm full eligible catalog versus two-game refresh before production writes. Replacements require the exact recoverable manifest to be reviewed and approved. No destructive removal is included.</li><li>No recurring enrichment schedule is authorized or implemented.</li></ol></details>
+</section>
+<section><h2>Done Means</h2><ul><li>Future Knight's verified images, Steam link and available trailers actually appear and play in production.</li><li>No add-on identity can bypass media validation; raw previous data stays recoverable.</li><li>Direct-link closing returns focus to a usable browse control.</li><li>Existing hidden, watched and Thinking entries are identical before/after operations.</li><li>Enrichment failure does not block or replay Telegram delivery.</li></ul><p><small>Current public media map: 2,495 legacy-or-incomplete entries, zero new validated Steam-match records. That does not mean all legacy images are broken. Do not mass-refresh or delete them as a shortcut.</small></p></section>
+<p><a href="../research/2026-09-30-production-detail-remediation.md">Cited evidence, tests and exact approval boundaries</a> / <a href="../research/2026-09-30-legacy-igdb-media-matching.md">Focused IGDB research</a></p>
+<p><small>Research and plan only. No application code, credentials, webhook or production data changed.</small></p>
+</main>
+</html>

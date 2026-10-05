@@ -57,8 +57,10 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
     return () => {
       if (dialog?.open) dialog.close();
       document.body.style.overflow = previousOverflow;
-      if (previousFocusRef.current?.isConnected) previousFocusRef.current.focus();
-      else document.querySelector<HTMLElement>('button[data-browse-focus]')?.focus();
+      const opener = previousFocusRef.current;
+      if (opener?.isConnected && opener !== document.body) opener.focus();
+      if (!opener || opener === document.body || document.activeElement !== opener)
+        document.querySelector<HTMLElement>('[data-game-search]')?.focus();
     };
   }, []);
 
@@ -154,10 +156,10 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
           </button>
         </div>
 
-        <div role="group" className="flex flex-wrap gap-2 border-b border-gray-200 bg-gray-50 p-3" aria-label="Media selection">
+        {(screenshots.length > 0 || videos.length > 0) && <div role="group" className="flex flex-wrap gap-2 border-b border-gray-200 bg-gray-50 p-3" aria-label="Media selection">
           {screenshots.length > 0 && <button type="button" aria-pressed={!showVideo} onClick={() => setActiveVideo(null)} className="rounded-lg bg-white px-3 py-2 text-sm text-gray-800">Screenshots ({screenshots.length})</button>}
           {videos.map((video, index) => <button key={video.video_id} type="button" aria-pressed={activeVideo === index} onClick={() => setActiveVideo(index)} className="rounded-lg bg-white px-3 py-2 text-sm text-gray-800">{video.name || ('Video ' + (index + 1))}{video.source === 'steam' ? ' (PC)' : ''}</button>)}
-        </div>
+        </div>}
         {screenshots[imageIndex] && !showVideo && <p className="px-4 pt-2 text-xs text-gray-600">{imageSource === 'steam' ? 'Steam screenshot (PC footage)' : imageSource === 'igdb' ? 'IGDB screenshot' : imageSource === 'nintendo' ? 'Nintendo screenshot' : 'Screenshot'}</p>}
         {media?.collection_complete === false && <p className="px-4 pt-2 text-xs text-amber-800">Some source media could not be collected. Showing available media.</p>}
 
@@ -277,6 +279,7 @@ export default function GameDetailModal({ game, rating, steam, media, curatedEnt
               )}
               {(curatedEntry.source_price_eur != null || curatedEntry.discount_pct != null || curatedEntry.days_remaining != null) && (
                 <p className="text-xs font-medium text-gray-700">
+                  {curatedEntry.source === 'ntdeals' && (curatedEntry.days_remaining === 0 || game.price_has_discount_b === false) && 'Historical NT Deals offer: '}
                   {curatedEntry.source_price_eur != null && `${curatedEntry.source === 'ntdeals' ? 'NT Deals' : 'Nintendo Life'} price: ${curatedEntry.source_price_eur.toFixed(2)}€`}
                   {curatedEntry.discount_pct != null && ` · ${curatedEntry.discount_pct}% off`}
                   {curatedEntry.days_remaining != null && ` · ${curatedEntry.days_remaining} days left`}

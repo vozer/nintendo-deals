@@ -321,3 +321,9 @@ The audit created an AI Unified Process baseline so the remediation can be revie
 - [Vercel Blob](https://vercel.com/docs/vercel-blob)
 - [Next.js 16 upgrade guide](https://nextjs.org/docs/app/guides/upgrading/version-16)
 - [Next.js: Renaming Middleware to Proxy](https://nextjs.org/docs/messages/middleware-to-proxy)
+
+## 2026-10-04 offer expiry hook verification
+
+The official [Future Knight product page](https://www.nintendo.com/es-es/Juegos/Programas-descargables-Nintendo-Switch/Future-Knight-3151132.html) renders a sale end date from its selected title's price data. A read-only query to Nintendo's public [`/v1/price` endpoint](https://api.ec.nintendo.com/v1/price?country=ES&lang=es&ids=70010000121425) returned `title_id`, `discount_price.raw_value`, and `discount_price.end_datetime`. The matching Spanish Solr record exposes the Nintendo Shop ID as `nsuid_txt`.
+
+This is an observed source integration, not a published API stability guarantee. The worker batches Shop IDs by 50, accepts only unambiguous future `end_datetime` values whose raw sale price matches the catalog's discounted cents, and omits absent or stale dates rather than inferring an expiry. The website accepts a date only when the published snapshot is at most 36 hours old and still matches the currently displayed discounted price.

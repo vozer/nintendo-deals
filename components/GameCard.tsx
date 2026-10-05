@@ -12,6 +12,7 @@ interface GameCardProps {
   rating?: GameRating;
   steam?: SteamRating;
   media?: GameMedia;
+  offerEndDate?: string;
   curationKind?: 'nintendolife' | 'ntdeals' | null;
   globalMean?: number;
   onHide: (gameId: string) => void;
@@ -57,7 +58,7 @@ function ratingBg(score: number): string {
   return 'bg-red-50';
 }
 
-export default function GameCard({ game, preferences, rating, steam, media, curationKind, globalMean, onHide, onWatch, feedback, onRetry, onUnwatch, onOpenDetail, onThink }: GameCardProps) {
+export default function GameCard({ game, preferences, rating, steam, media, offerEndDate, curationKind, globalMean, onHide, onWatch, feedback, onRetry, onUnwatch, onOpenDetail, onThink }: GameCardProps) {
   const isOnSale = game.price_has_discount_b !== false;
   
   // Calculate display score (blended if steam available)
@@ -235,6 +236,10 @@ export default function GameCard({ game, preferences, rating, steam, media, cura
             </>
           )}
         </div>
+
+        {offerEndDate && <p className="text-xs font-medium text-amber-800">
+          Offer ends {new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(offerEndDate))}
+        </p>}
 
         <div className="flex items-center gap-2 flex-wrap">
           <a

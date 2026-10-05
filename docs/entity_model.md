@@ -9,6 +9,7 @@ erDiagram
     GAME ||--o| GAME_MEDIA : "has"
     GAME_MEDIA ||--o{ MEDIA_ASSET : "contains"
     GAME ||--o{ CURATED_ENTRY : "has source signals"
+    GAME ||--o| CURRENT_OFFER_STATE : "has current transition state"
     PREFERENCE_PROFILE ||--o{ HIDDEN_GAME : "hides"
     PREFERENCE_PROFILE ||--o{ WATCHED_GAME : "watches"
     PREFERENCE_PROFILE ||--o{ THINKING_GAME : "considers"
@@ -16,12 +17,13 @@ erDiagram
     GAME ||--o{ WATCHED_GAME : "is referenced by"
     GAME ||--o{ THINKING_GAME : "is referenced by"
     PREFERENCE_PROFILE ||--o{ TELEGRAM_UPDATE : "deduplicates"
-    PREFERENCE_PROFILE ||--o{ TELEGRAM_DELIVERY : "claims"
+    CURRENT_OFFER_STATE ||--o{ TELEGRAM_DELIVERY : "may trigger"
+    GAME ||--o| OFFER_END_DATE : "may have"
 ```
 
-This is a normalized logical view of the current Nintendo catalog responses and JSON documents; physical persistence is denormalized into provider maps keyed by Nintendo game identifier.
+This is a normalized logical view of the current Nintendo catalog responses and JSON documents; physical persistence is denormalized into provider maps keyed by Nintendo game identifier. Telegram audit events and delivery claims use separate immutable private Blob records; they are never stored in or returned with preferences.
 
-Telegram replay and delivery records are private operational metadata stored beside preferences. They are not included in the public preference API response.
+Bounded callback replay receipts remain internal to the preference document and are excluded from its public API shape. Permanent Telegram delivery claims and audit events are separate private Blob records and never modify preferences.
 
 ### GAME
 
@@ -97,15 +99,55 @@ Tracks completed inbound callbacks so Telegram retries cannot apply the same act
 
 ### TELEGRAM_DELIVERY
 
-Claims one outbound alert or digest item for one Madrid calendar date before sending it.
+Claims one stable offer transition or one watched alert state before sending it. The event identity is independent of the calendar day so unchanged offers are not repeated on subsequent runs. Claims and results are immutable records in a private delivery ledger, not preference metadata.
 
 | Attribute | Description | Data Type | Length/Precision | Validation Rules |
 |---|---|---|---|---|
-| profile_id | Owning preference profile | String | 50 | Not Null, Foreign Key (PREFERENCE_PROFILE.id) |
-| delivery_date | Europe/Madrid calendar date | Date | - | Not Null |
-| delivery_key | Stable message identity for that date | String | 120 | Not Null |
+| event_id | Stable immutable identity covering a game offer episode and price transition | String | 500 | Not Null, Unique |
+| claimed_at | UTC time the first send attempt was claimed | DateTime | - | Not Null |
+| metadata | Game, price, transition, and alert details | JSON | - | Optional |
+| outcome | Confirmed sent, rejected, or unresolved attempt | String | 20 | Optional |
+| message_id | Telegram message identifier when a send was confirmed | Integer | 19 | Optional |
 
-**Constraints:** Each profile, date, and delivery key tuple must be unique.
+**Constraints:** Each delivery key is unique for the lifetime of the event ledger; a pending or unresolved claim must never be blindly resent.
+
+### CURRENT_OFFER_STATE
+
+Tracks the last complete Nintendo discount observation independently of shopper preferences and homepage eligibility.
+
+| Attribute | Description | Data Type | Length/Precision | Validation Rules |
+|---|---|---|---|---|
+| game_id | Nintendo game identifier | String | 50 | Not Null, Unique |
+| active | Whether the latest complete snapshot includes a qualifying active discount | Boolean | - | Not Null |
+| price_cents | Discounted EUR price in integer cents | Integer | 10 | Optional, Min: 0 |
+| episode | Consecutive active-offer episode number | Integer | 10 | Not Null, Min: 1 |
+| price_change_sequence | Price transition count within the episode | Integer | 10 | Not Null, Min: 0 |
+
+### OFFER_END_DATE
+
+Optional official Nintendo discount expiry evidence is stored in the separate `offer-end-dates.json` snapshot. A record is displayed only when its discounted cents match the current game price, its end is in the future, and the snapshot is no more than 36 hours old.
+
+| Attribute | Description | Data Type | Length/Precision | Validation Rules |
+|---|---|---|---|---|
+| game_id | Nintendo game identifier | String | 50 | Not Null, Foreign Key (GAME.id) |
+| price_cents | Discounted EUR cents represented by this expiry record | Integer | 10 | Not Null, Min: 0 |
+| end_datetime | Official Nintendo discount end instant | DateTime | - | Not Null, Future at display time |
+| checked_at | Time the source hook was refreshed | DateTime | - | Not Null; max age 36 hours at display time |
+
+### TELEGRAM_AUDIT_EVENT
+
+Append-only record for every verified inbound update and outbound Bot API attempt/result. Stored under private Blob access with no retention expiry and retrieved through a bounded, filtered authenticated API.
+
+| Attribute | Description | Data Type | Length/Precision | Validation Rules |
+|---|---|---|---|---|
+| event_id | Unique event record identifier | String | 500 | Not Null, Unique |
+| occurred_at | UTC timestamp | DateTime | - | Not Null |
+| direction | Inbound update or outbound Bot API call | String | 10 | Not Null |
+| correlation_id | Telegram update, callback, or worker operation reference | String | 200 | Optional |
+| request | Redacted update or outbound method/payload | JSON | - | Optional |
+| response | Telegram response, action result, or safe error description | JSON | - | Optional |
+
+**Constraints:** Records are immutable and retained indefinitely. Secrets, bearer credentials, and bot-token-bearing URLs must be redacted before storage.
 
 ### GAME_RATING
 
@@ -141,6 +183,8 @@ Stores optional Steam review evidence for a Nintendo game with a reliable cross-
 ### GAME_MEDIA
 
 Stores the provenance and refresh state for a game's media collection.
+
+Optional `igdb_match` records the validated provider game ID, title, canonical URL and validation time independently of frozen rating scores. A previous `igdb_url` is retained as `legacy_igdb_url` when a verified association supersedes it; existing assets are never removed by routine refresh.
 
 | Attribute | Description | Data Type | Length/Precision | Validation Rules |
 |---|---|---|---|---|
@@ -186,4 +230,4 @@ Stores a source-specific editorial or deal-pick signal; one game can retain both
 
 ### DAILY_DEALS_SNAPSHOT
 
-Private `telegram-deals.json` stores the sorted eligible Nintendo game IDs from the last successful daily delivery and its Madrid date. A strong Blob ETag is the conditional-write revision. Missing state means first-run baseline; invalid or unreadable state fails closed. It is independent of user preferences and Telegram callback metadata.
+Private `telegram-deals.json` stores the latest complete offer state, keyed by Nintendo game ID: whether the discounted offer is active, its discounted price in cents, its active-discount episode, and its price-change sequence. It also records the snapshot date and uses a strong Blob ETag as the conditional-write revision. A complete observation that omits a game closes its active episode; a later discounted observation starts a new episode. A changed price advances the sequence. Missing state means a quiet first-run baseline; invalid or unreadable state fails closed. This record is independent of user preferences and Telegram callback metadata. Each transition delivery has a separate permanent claim/result record, allowing confirmed sends to be skipped on replay while an unknown outcome stops for operator review.

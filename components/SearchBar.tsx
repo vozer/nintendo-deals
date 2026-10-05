@@ -39,6 +39,7 @@ export default function SearchBar({ value, onChange }: SearchBarProps) {
         value={localValue}
         onChange={(e) => handleChange(e.target.value)}
         placeholder="Search games..."
+        data-game-search
         className="bg-transparent w-full text-sm text-gray-900 placeholder-gray-400 outline-none"
       />
       {localValue && (

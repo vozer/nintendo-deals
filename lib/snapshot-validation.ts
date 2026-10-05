@@ -56,6 +56,12 @@ export function isMediaSnapshot(value: unknown): value is MediaMap {
       && (video.youtube_url === undefined || (video.type === 'youtube' && video.youtube_url === `https://www.youtube.com/embed/${video.video_id}`))
       && (video.type !== 'steam' || (/^\d+$/.test(video.video_id) && isRecord(raw.steam_match) && video.source_url === `https://store.steampowered.com/app/${raw.steam_match.steam_id}/`)))
     && (raw.igdb_url === null || raw.igdb_url === undefined || isUrl(raw.igdb_url))
+    && (raw.legacy_igdb_url === undefined || mediaUrl(raw.legacy_igdb_url))
+    && (raw.igdb_match === undefined || (isRecord(raw.igdb_match)
+      && Number.isSafeInteger(raw.igdb_match.igdb_id) && Number(raw.igdb_match.igdb_id) > 0
+      && typeof raw.igdb_match.matched_title === 'string' && raw.igdb_match.matched_title.trim().length > 0
+      && mediaUrl(raw.igdb_match.url) && new URL(raw.igdb_match.url).hostname === 'www.igdb.com'
+      && raw.igdb_url === raw.igdb_match.url && typeof raw.igdb_match.last_updated === 'string'))
     && ['nintendo', 'igdb', 'steam', 'mixed'].includes(String(raw.source))
     && typeof raw.last_updated === 'string'
     && (raw.collection_complete === undefined || typeof raw.collection_complete === 'boolean')

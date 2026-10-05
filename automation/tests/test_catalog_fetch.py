@@ -93,23 +93,25 @@ class CatalogFetchTests(unittest.TestCase):
         self.assertIn("-system_type:nintendoswitch2", query["fq"][0])
         self.assertIn("fs_id:123", query["fq"][0])
 
-    def test_delivery_claim_uses_the_authenticated_endpoint(self):
+    def test_offer_delivery_claim_uses_a_permanent_event_id_and_authenticated_endpoint(self):
         with patch.object(run_daily, "request_json", return_value={"claimed": True}) as request:
-            self.assertTrue(run_daily.claim_daily_delivery(
-                "https://nintendo-deals.test/", "test-key", "2026-09-28", "digest:123"
+            self.assertTrue(run_daily.claim_offer_delivery(
+                "https://nintendo-deals.test/", "test-key", "offer:123:1:0:499", {"fs_id": "123"}
             ))
 
         self.assertEqual(request.call_args.args[0], "https://nintendo-deals.test/api/telegram/deliveries/claim")
         self.assertEqual(request.call_args.kwargs["headers"], {"x-api-key": "test-key"})
-        self.assertEqual(request.call_args.kwargs["payload"], {"date": "2026-09-28", "key": "digest:123"})
+        self.assertEqual(request.call_args.kwargs["payload"], {
+            "event_id": "offer:123:1:0:499", "metadata": {"fs_id": "123"},
+        })
 
-    def test_daily_digest_replay_skips_already_claimed_messages(self):
-        sent = set()
+    def test_offer_transition_replay_skips_already_sent_messages(self):
+        claimed = set()
 
-        def claim(_base_url, _api_key, _date, key):
-            if key in sent:
+        def claim(_base_url, _api_key, event_id, _metadata):
+            if event_id in claimed:
                 return False
-            sent.add(key)
+            claimed.add(event_id)
             return True
 
         game_record = {
@@ -123,18 +125,23 @@ class CatalogFetchTests(unittest.TestCase):
             "publisher": "Publisher",
         }
         curated = {"123": {"source": "nintendolife", "review": "A good pick."}}
-        with patch.object(run_daily, "claim_daily_delivery", side_effect=claim), patch.object(
-            run_daily, "telegram_request"
-        ) as telegram:
-            first = run_daily.send_digest(
-                "token", "chat", [game_record], curated, {}, "https://nintendo-deals.test", "api-key", "2026-09-28"
-            )
-            replay = run_daily.send_digest(
-                "token", "chat", [game_record], curated, {}, "https://nintendo-deals.test", "api-key", "2026-09-28"
-            )
+        events = [{"fs_id": "123", "kind": "new", "previous_price_cents": None,
+                   "price_cents": 499, "episode": 1, "price_change_sequence": 0}]
+        kwargs = ("token", "chat", [game_record], events, ["123"], curated, {},
+                  "https://nintendo-deals.test", "api-key", "run-1")
+        with patch.object(run_daily, "claim_offer_delivery", side_effect=claim), \
+             patch.object(run_daily, "complete_offer_delivery") as complete, \
+             patch.object(run_daily, "send_game_message", return_value={"result": {"message_id": 7}}) as send:
+            first = run_daily.send_offer_events(*kwargs)
+            replay = run_daily.send_offer_events(*kwargs)
 
-        self.assertEqual((first, replay), (1, 0))
-        telegram.assert_called_once()
+        self.assertEqual(first["offer_messages_sent"], 1)
+        self.assertEqual(first["new_deals_sent"], 1)
+        self.assertEqual(first["digest_messages_sent"], 1)
+        self.assertEqual(replay["offer_messages_sent"], 0)
+        self.assertEqual(send.call_count, 1)
+        complete.assert_called_once_with("https://nintendo-deals.test", "api-key",
+                                         "offer:123:1:0:499", "sent", {"message_id": 7})
 
     def test_telegram_request_errors_redact_bot_token_from_destination(self):
         error = urllib.error.HTTPError(

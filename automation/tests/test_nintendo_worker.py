@@ -51,11 +51,14 @@ class WorkerRulesTests(unittest.TestCase):
         self.assertNotIn("4", [item["fs_id"] for item in result])
 
     def test_price_alert_requires_price_below_threshold(self):
-        games = [game("1", "Cheap", price=1.99), game("2", "At Limit", price=5.0)]
+        not_discounted = game("3", "Cheap but not discounted", price=1.50)
+        not_discounted["price_has_discount_b"] = False
+        games = [game("1", "Cheap", price=1.99), game("2", "At Limit", price=5.0), not_discounted]
         preferences = {
             "watchGames": {
                 "1": {"threshold": 2, "title": "Cheap"},
                 "2": {"threshold": 5, "title": "At Limit"},
+                "3": {"threshold": 2, "title": "Cheap but not discounted"},
             }
         }
 
@@ -83,6 +86,19 @@ class WorkerRulesTests(unittest.TestCase):
         self.assertIn("Explore a hand-painted world.", text)
         self.assertIn("A thoughtful adventure.", text)
         self.assertNotEqual(text.strip(), "123")
+
+    def test_message_includes_available_ratings_and_only_the_supplied_offer_end_date(self):
+        item = game("123", "Reviewed game", price=4.99)
+        item["igdb_rating"] = {"aggregated_rating": 84.0, "aggregated_rating_count": 12,
+                                "rating": 79.0, "rating_count": 240}
+        item["steam_rating"] = {"score_pct": 91, "votes": 1320}
+        item["offer_end_date"] = "2026-10-14T21:59:59Z"
+        text = build_digest_message(item, {"review": "A good pick."}, {"hiddenGames": [], "watchGames": {}})
+        self.assertIn("IGDB: Critic 84/100 (12); Users 79/100 (240)", text)
+        self.assertIn("Steam: 91% positive (1320 reviews)", text)
+        self.assertIn("Offer ends: 14 Oct 2026", text)
+        item.pop("offer_end_date")
+        self.assertNotIn("Offer ends", build_digest_message(item, {}, {}))
 
     def test_digest_message_makes_relative_nintendo_store_url_absolute(self):
         text = build_digest_message(

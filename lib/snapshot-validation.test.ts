@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { isMediaSnapshot, isRatingsSnapshot, isSteamSnapshot } from './snapshot-validation';
 
 describe('enrichment snapshot validation', () => {
+  it('accepts verified IGDB identity and recoverable legacy URL but rejects inconsistent evidence', () => {
+    const entry = { screenshots: [], videos: [], source: 'igdb', last_updated: 'today', igdb_url: 'https://www.igdb.com/games/base', legacy_igdb_url: 'https://www.igdb.com/games/addon', igdb_match: { igdb_id: 123, matched_title: 'Base', url: 'https://www.igdb.com/games/base', last_updated: 'today' } };
+    expect(isMediaSnapshot({ '1001': entry })).toBe(true);
+    expect(isMediaSnapshot({ '1001': { ...entry, igdb_url: entry.legacy_igdb_url } })).toBe(false);
+    expect(isMediaSnapshot({ '1001': { ...entry, igdb_match: { ...entry.igdb_match, url: 'https://attacker.test/base' } } })).toBe(false);
+    expect(isMediaSnapshot({ '1001': { ...entry, legacy_igdb_url: 'https://attacker.test/addon' } })).toBe(false);
+  });
+
   it('accepts complete provider records', () => {
     expect(isRatingsSnapshot({ '1001': {
       igdb_id: 10, total_rating: 80, aggregated_rating: null, rating: 80,

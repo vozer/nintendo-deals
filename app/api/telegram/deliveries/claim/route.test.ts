@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
-const blobStore = vi.hoisted(() => ({ raw: null as string | null, revision: 0 }));
+const blobStore = vi.hoisted(() => ({ raw: null as string | null, revision: 0, ledger: new Map<string, { raw: string; etag: string }>() }));
 
 vi.mock('@vercel/blob', () => ({
-  get: async (_pathname: string, options: { headers?: Record<string, string> }) => {
+  get: async (pathname: string, options: { headers?: Record<string, string> }) => {
+    if (pathname !== 'preferences.json') {
+      const record = blobStore.ledger.get(pathname);
+      return record ? { statusCode: 200, stream: new Response(record.raw).body, blob: { etag: record.etag } } : null;
+    }
     if (blobStore.raw === null) return null;
     return {
       statusCode: 200,
@@ -13,7 +17,14 @@ vi.mock('@vercel/blob', () => ({
         ? String(blobStore.revision) : `W/"${blobStore.revision}"` },
     };
   },
-  put: async (_pathname: string, body: string, options: Record<string, unknown>) => {
+  put: async (pathname: string, body: string, options: Record<string, unknown>) => {
+    if (pathname !== 'preferences.json') {
+      if (blobStore.ledger.has(pathname)) {
+        const error = new Error('already exists'); error.name = 'BlobPreconditionFailedError'; throw error;
+      }
+      blobStore.ledger.set(pathname, { raw: body, etag: '1' });
+      return;
+    }
     if (options.ifMatch && options.ifMatch !== String(blobStore.revision)) {
       const error = new Error('precondition failed');
       error.name = 'BlobPreconditionFailedError';
@@ -44,10 +55,30 @@ function request(body: unknown, apiKey = 'test-api-key') {
 beforeEach(() => {
   blobStore.raw = null;
   blobStore.revision = 0;
+  blobStore.ledger.clear();
   process.env.RATINGS_API_KEY = 'test-api-key';
 });
 
 describe('daily Telegram delivery claim', () => {
+  it('permanently claims an offer event and reports a confirmed send on replay', async () => {
+    const originalPreferences = { hiddenGames: ['1001'], watchGames: { '1002': { title: 'Watched game', threshold: 5 } }, thinkingAbout: ['1003'] };
+    blobStore.raw = JSON.stringify(originalPreferences);
+    blobStore.revision = 1;
+    const post = (body: unknown) => POST(request(body));
+    expect(await (await post({ event_id: 'offer:1004:1:2:399', metadata: { fs_id: '1004', price_cents: 399 } })).json())
+      .toEqual({ claimed: true, outcome: null, message_id: null });
+    expect(await (await post({ event_id: 'offer:1004:1:2:399' })).json())
+      .toEqual({ claimed: false, outcome: 'unknown' });
+    expect(await (await post({ operation: 'complete', event_id: 'offer:1004:1:2:399', outcome: 'sent', details: { message_id: 41 } })).json())
+      .toEqual({ completed: true, outcome: 'sent', message_id: 41 });
+    expect(await (await post({ event_id: 'offer:1004:1:2:399' })).json())
+      .toEqual({ claimed: false, outcome: 'sent', message_id: 41 });
+    const lookup = await GET(new NextRequest('https://nintendo-deals.test/api/telegram/deliveries/claim?event_id=offer%3A1004%3A1%3A2%3A399',
+      { headers: { 'x-api-key': 'test-api-key' } }));
+    expect(await lookup.json()).toEqual({ claimed: true, outcome: 'sent', message_id: 41 });
+    expect(JSON.parse(blobStore.raw!)).toEqual(originalPreferences);
+  });
+
   it('looks up delivery confirmation without claiming or changing any preferences', async () => {
     const url = 'https://nintendo-deals.test/api/telegram/deliveries/claim?date=2026-09-30&key=sent:deal:1004';
     expect((await GET(new NextRequest(url))).status).toBe(401);

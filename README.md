@@ -11,14 +11,18 @@
 
 ### Focused Media Maintenance
 
-The existing manual maintenance workflow accepts `game_id`, `limit` (1-100), and `refresh_incomplete`. Scripts default to dry-run; dry-run retrieves and stages assets without publishing. Even production-targeted dry-runs require explicit scraper-run approval.
+The existing manual maintenance workflow accepts `game_id`, `limit` (1-100), and `refresh_incomplete`. Scripts default to dry-run; dry-run retrieves and stages assets without publishing. Even production-targeted dry-runs require explicit scraper-run approval. Media CLI `--output <new-file>` records before/after entries and revision without overwriting an existing file. Cached IGDB IDs are revalidated against title, original Switch platform, game type and edition before asset acquisition; validated `igdb_match` is independent of frozen ratings, and replaced associations retain `legacy_igdb_url`. No new enrichment schedule is added.
+
+For an explicitly authorized full-catalog refresh, the same media CLI accepts `--all`, which revisits existing complete entries and bypasses the small-run limit. It is mutually exclusive with `--game-id`; it retains the existing original-Switch/catalog rules and excludes blocked titles and returned prices above the cap. This is an operator-run mode, not a new scheduled job. Stage with a fresh `--output` path, retain a recovery snapshot, review exact changed records and publish only with the required authorization and current revision.
+
+Every run now freezes its selection and starting snapshots in a local SQLite checkpoint under `output/media-crawls/<run-id>/`; each game's result and provider status are committed durably before progress is printed. A provider exception saves the current partial result and manifest, then stops before the next game. The run directory is gitignored. If interrupted, resume with `--resume <run-dir>`; `--retry-incomplete` explicitly retries saved partials, and `--export-only` reconstructs a manifest without network requests. Each export is new and non-overwriting. Publish only after inspecting the staged manifest, with `--resume <run-dir> --apply --apply-manifest <reviewed-file>`; apply requires an exact match to the checkpoint, refuses pending/incomplete runs, checks the frozen revision, and preflights the Vercel request and projected response against the function body limit. The previously interrupted 1,500-game crawl left no media payloads to recover, so those games must be fetched again.
 
 ```bash
 # Only against an explicitly authorized target; replace localhost with production only after approval.
 python3 scripts/media-backfill.py --base-url http://127.0.0.1:3100 --game-id 3151132 --limit 1 --refresh-incomplete
 ```
 
-Add `--apply` only after inspecting the staged additive result and authorizing that target. Deploy the revision-aware API first. `RATINGS_API_KEY` is required for writes; IGDB credentials are optional for Nintendo/Steam-only media. Validated Steam matching checks title, edition, product type, and publisher/developer; ambiguous or mismatched candidates are omitted. IGDB acquisition is bounded at 500 screenshots/500 videos per game and reports incomplete collection at the limit or on source failures. Media browsing and enrichment never mutate preferences or send Telegram messages.
+`--apply` is only accepted with a completed `--resume` checkpoint and its previously staged manifest, after inspecting the additive result and explicitly authorizing that target. Deploy the revision-aware API first. `RATINGS_API_KEY` is required for writes; IGDB credentials are optional for Nintendo/Steam-only media, but their absence is recorded as incomplete. Validated Steam matching checks title, edition, product type, and publisher/developer; ambiguous or mismatched candidates are omitted. IGDB acquisition is bounded at 500 screenshots/500 videos per game and reports incomplete collection at the limit or on source failures. Media browsing and enrichment never mutate preferences or send Telegram messages.
 
 A personal, password-protected web app to track Nintendo eShop deals on Switch. Fetches live data from the Nintendo Europe Solr API, displays games with prices, discounts, IGDB ratings, and lets you hide or set price watch thresholds with Telegram alerts.
 
@@ -32,7 +36,7 @@ A personal, password-protected web app to track Nintendo eShop deals on Switch. 
 | Content filter | Hentai/dating titles auto-blocked; collections and sports in own tabs |
 | Hide games | Permanently hide games you're not interested in |
 | Price watch | Set < 2 €, < 5 €, or < 10 € thresholds — game hides until price drops |
-| Telegram notifications | Daily newly eligible Deals, watched threshold alerts, and up to ten Nintendo Life recommendations; title images, source buttons, and in-chat actions |
+| Telegram notifications | Daily new/changed/re-entered offer notices, watched price alerts, and up to ten curated transition picks; title images, source buttons, and in-chat actions |
 | Views | Deals / Collections / Sports / Thinking / Hidden / Watched / Few Reviews / Low Quality |
 | Search | Full-text search across game titles and descriptions |
 | Sort | By popularity, discount %, price, title, rating, or best value |
@@ -110,29 +114,36 @@ Vercel Blob ←──→ /api/ratings ←──────────┤
 GitHub Actions (daily, 10:07 Europe/Madrid)
   ├─→ Nintendo Life eShop Selects → curated-nintendolife.json
   ├─→ IGDB API → ratings.json → /api/ratings PUT
-  ├─→ complete Nintendo offers → shared homepage eligibility → compare telegram-deals.json
-  ├─→ newly eligible Deals → Telegram new-deal messages
-  ├─→ preferences.json + watched-ID lookups → Telegram threshold alerts
-  ├─→ Nintendo Life selections + preferences → Telegram digest (up to 10, excluding arrivals sent that run)
-  └─→ successful delivery → conditional telegram-deals.json commit + redacted run artifact
+  ├─→ complete Nintendo offers → compare active price/episode snapshot
+  ├─→ new, changed-price, or re-entered homepage deals → one Telegram message per transition
+  ├─→ preferences.json + watched-ID lookups → threshold alerts for explicitly discounted games
+  ├─→ Nintendo /v1/price hook → exact-price offer end dates for tiles and messages
+  └─→ permanent delivery/audit records → conditional offer-state commit + redacted run artifact
 Vercel /api/telegram/webhook
   └─→ validated callback → atomic preference action → edit text/caption, retain buttons
+Vercel /api/telegram/audit
+  └─→ immutable private inbound/outbound event history; bounded API-key-protected search
 ```
 
 ### Notification Behavior
 
-- **New deal** means a game enters or re-enters the homepage Deals selection compared with the last successful daily snapshot. It does not mean a new game release. Confidence, classification, Steam moderation and shovelware rules are shared with the homepage; hidden, watched and thinking games are excluded. Browser-local excluded Steam tags are not available to the scheduler.
-- **Price alert** means a watched game's discounted price is strictly below its 2/5/10 EUR threshold. These are independent of arrivals; zero threshold alerts can be correct even with many active offers.
-- **Curated digest** selects up to ten active Nintendo Life games, excluding hidden/watched games and that run's new arrivals. NT Deals is a separate Deal Pick signal, not Nintendo Life curation.
+- **New deal** means an offer enters the complete original-Switch snapshot; **offer changed** means its discounted price changes; **offer returned** means a complete crawl observed it absent before it reappeared. A stable price in one continuous episode is not sent again on later days. Homepage eligibility still applies, including confidence, classification, Steam moderation, and exclusions for hidden, watched, and thinking games. Browser-local excluded Steam tags are not available to the scheduler.
+- **Price alert** means a watched game's explicitly discounted price is strictly below its 2/5/10 EUR threshold. The stable game/offer state can be alerted once; a changed price or return is a distinct offer state.
+- **Curated picks** select up to ten active Nintendo Life games for context on eligible offer transitions; unchanged games do not produce a repeated daily digest message. NT Deals is a separate Deal Pick signal, not Nintendo Life curation.
+- **Offer end date** is read from Nintendo's official price hook, matched by Nintendo Shop ID and exact discounted cents. Tiles and messages omit the date if the hook is absent, expired, stale, or does not match the current sale.
 - Available Nintendo title images are sent with readable, bounded HTML captions. Without an image, send text. Link buttons are additive: Show, Nintendo, Steam and Nintendo Life are retained whenever their destinations exist. Steam is also available for non-curated games. Hide and Alert 2/5/10 EUR remain on the original game message.
 - Setting an Alert from Telegram sends a persistent chat confirmation, for example `Future Knight Alert for <5€ set`, retaining Show (the app game deep link) and all available source URL buttons. The callback is acknowledged silently to clear the spinner, not as a temporary success toast. Duplicate callback delivery does not duplicate confirmed replies; the original game caption/text still updates. Confirmation replies omit mutating buttons to avoid recursive actions.
-- The first arrival run creates a quiet baseline, not a catch-up flood. Production initialization on 2026-09-30 saved 104 eligible games. Later runs compare against that set.
-- Private `telegram-deals.json` stores arrival history independently of preferences. Daily claims and confirmed arrival-send markers live in internal Telegram metadata; public preference APIs expose only preferences.
-- Daily replay claims are at-most-once, not exactly-once guarantees. An ambiguous send is not blindly retried. See the [operational runbook and backlog](docs/telegram-notification-backlog.md).
+- The first transition-snapshot run creates a quiet baseline, not a catch-up flood. It imports current active prices without sending historical messages.
+- Private `telegram-deals.json` stores offer episodes independently of preferences. Permanent event delivery claims and Telegram audit records are separate private Blob objects; public preference APIs expose only preferences.
+- Delivery is at-most-once, not exactly-once. An ambiguous send is not blindly retried; the outbound request and response/unknown state remain searchable by date and filters in `/api/telegram/audit`.
+
+### Telegram Audit API
+
+`GET /api/telegram/audit` requires `x-api-key: $RATINGS_API_KEY`. Dates are UTC and default to the current UTC day. Optional query parameters are `date=YYYY-MM-DD`, `direction=inbound|outbound|internal`, `kind=<event-kind>`, `correlation_id=<id>`, `q=<text>`, `limit=1..100`, and opaque `cursor=<next-page-cursor>`. Filtered reads scan at most 500 stored events per request and return a continuation cursor when more history remains. Audit records have no application-configured retention TTL; credentials and bot-token URLs are redacted before storage.
 
 ### Verification and Feature Status
 
-The image/buttons/new-arrivals feature is **implemented and deployed**. [Release evidence](docs/plans/2026-09-30-telegram-deal-arrivals.md) records the live photo preview, authenticated baseline run, unchanged preferences, and local gates. The first natural production arrival and shopper-initiated caption action remain explicit validation tasks.
+The image/buttons/new-arrivals baseline is **implemented and deployed**. The transition suppression, permanent Telegram history, and official expiry display are implemented locally and have not been deployed. [Release evidence](docs/plans/2026-09-30-telegram-deal-arrivals.md) records the deployed baseline. The first natural production arrival and shopper-initiated caption action remain explicit validation tasks.
 
 Local checks: `python3 -m unittest discover -s automation/tests`, `npm test`, `npm run lint`, `npx tsc --noEmit`, `npm run build`, `npm run check:aiup`, and `npm run test:e2e`. Browser tests use local synthetic data, not production preference mutations.
 

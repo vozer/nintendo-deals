@@ -14,6 +14,7 @@ import urllib.request
 from datetime import date, datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
+from uuid import uuid4
 
 from automation.content_policy import (
     MAX_DISCOUNTED_PRICE_EUR,
@@ -41,10 +42,13 @@ SOLR_DEALS_FILTER = (
 )
 IGDB_TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 IGDB_GAMES_URL = "https://api.igdb.com/v4/games"
+NINTENDO_PRICE_URL = "https://api.ec.nintendo.com/v1/price"
+NINTENDO_PRICE_BATCH_SIZE = 50
 IGDB_REQUEST_INTERVAL = 0.35
 SOLR_FIELDS = ",".join(
     [
         "fs_id",
+        "nsuid_txt",
         "title",
         "title_master_s",
         "image_url_sq_s",
@@ -66,8 +70,10 @@ SOLR_FIELDS = ",".join(
 SUMMARY_FIELDS = (
     "catalog_records", "games", "watched_games", "ratings_records",
     "nintendolife_entries", "ntdeals_entries", "rating_updates",
-    "price_alerts", "digest_items", "price_alerts_sent",
-    "digest_messages_sent", "new_deals", "new_deals_sent", "eligible_deals", "deals_baseline_initialized", "duration_seconds",
+    "price_alerts", "digest_items", "price_alerts_sent", "digest_messages_sent",
+    "new_deals", "new_deals_sent", "price_changed_deals", "price_changed_deals_sent",
+    "reentered_deals", "reentered_deals_sent", "offer_events", "offer_messages_sent",
+    "offer_end_dates", "offer_end_date_refresh_failed", "eligible_deals", "deals_baseline_initialized", "duration_seconds",
 )
 RUN_STAGE = "startup"
 RUN_STARTED_AT = time.monotonic()
@@ -180,6 +186,69 @@ def fetch_games() -> list[dict[str, Any]]:
         )
 
     return [game for game in games_by_id.values() if is_active_deal(game)]
+
+
+def fetch_offer_end_dates(games: list[dict[str, Any]], now: datetime | None = None) -> dict[str, dict[str, Any]]:
+    """Read Nintendo's official price hook and keep only unambiguous current-price matches."""
+    now = now or datetime.now(timezone.utc)
+    nsuid_to_games: dict[str, list[dict[str, Any]]] = {}
+    for game in games:
+        raw_ids = game.get("nsuid_txt")
+        ids = raw_ids if isinstance(raw_ids, list) else [raw_ids]
+        for raw_id in ids:
+            nsuid = str(raw_id or "").strip()
+            if nsuid.isdigit():
+                nsuid_to_games.setdefault(nsuid, []).append(game)
+
+    ids = sorted(nsuid_to_games)
+    candidates: dict[str, list[tuple[int, str | None]]] = {}
+    checked_at = now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    for start in range(0, len(ids), NINTENDO_PRICE_BATCH_SIZE):
+        batch = ids[start:start + NINTENDO_PRICE_BATCH_SIZE]
+        query = urllib.parse.urlencode({"country": "ES", "lang": "es", "ids": ",".join(batch)})
+        data = request_json(f"{NINTENDO_PRICE_URL}?{query}", timeout=30)
+        prices = data.get("prices") if isinstance(data, dict) else None
+        if not isinstance(prices, list):
+            raise RuntimeError("Nintendo official price response did not contain prices")
+        for price in prices:
+            if not isinstance(price, dict):
+                continue
+            nsuid = str(price.get("title_id", ""))
+            sale = price.get("discount_price")
+            if nsuid not in nsuid_to_games or not isinstance(sale, dict):
+                continue
+            raw_price = sale.get("raw_value")
+            raw_end = sale.get("end_datetime")
+            try:
+                price_cents = round(float(raw_price) * 100)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            end_value: str | None = None
+            if isinstance(raw_end, str) and raw_end.strip():
+                try:
+                    end = datetime.fromisoformat(raw_end.replace("Z", "+00:00"))
+                    if end.tzinfo is None:
+                        end = end.replace(tzinfo=timezone.utc)
+                    if end > now:
+                        end_value = end.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+                except ValueError:
+                    pass
+            for game in nsuid_to_games[nsuid]:
+                try:
+                    catalog_cents = round(float(game.get("price_discounted_f")) * 100)
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if catalog_cents == price_cents:
+                    candidates.setdefault(str(game["fs_id"]), []).append((price_cents, end_value))
+
+    result: dict[str, dict[str, Any]] = {}
+    for fs_id, matches in candidates.items():
+        unique = set(matches)
+        if len(unique) != 1 or next(iter(unique))[1] is None:
+            continue
+        price_cents, end_datetime = unique.pop()
+        result[fs_id] = {"price_cents": price_cents, "end_datetime": end_datetime, "checked_at": checked_at}
+    return result
 
 
 def fetch_game_by_id(fs_id: str) -> dict[str, Any] | None:
@@ -420,9 +489,54 @@ def telegram_request(bot_token: str, method: str, payload: dict[str, Any]) -> An
     return result
 
 
+def append_worker_audit_event(base_url: str, api_key: str, event: dict[str, Any]) -> None:
+    result = request_json(f"{base_url.rstrip('/')}/api/telegram/audit", method="POST", payload=event,
+                          headers={"x-api-key": api_key})
+    if not isinstance(result, dict) or result.get("stored") is not True:
+        raise RuntimeError("Telegram audit API did not confirm the event")
+
+
+def audited_telegram_request(bot_token: str, method: str, payload: dict[str, Any],
+                             base_url: str, api_key: str, correlation_id: str) -> Any:
+    request_id = uuid4().hex
+    request_time = datetime.now(timezone.utc).isoformat()
+    append_worker_audit_event(base_url, api_key, {
+        "event_id": f"worker:{request_id}:attempt", "occurred_at": request_time,
+        "direction": "outbound", "kind": "telegram.request.attempt", "correlation_id": correlation_id,
+        "request": {"source": "github_worker", "method": method, "payload": payload},
+    })
+    try:
+        response = telegram_request(bot_token, method, payload)
+    except Exception as error:
+        message = str(error)
+        rejected = bool(re.search(r"HTTP 4\d\d", message))
+        try:
+            append_worker_audit_event(base_url, api_key, {
+                "event_id": f"worker:{request_id}:result", "occurred_at": datetime.now(timezone.utc).isoformat(),
+                "direction": "outbound", "kind": "telegram.request.result", "correlation_id": correlation_id,
+                "response": {"outcome": "rejected" if rejected else "unknown",
+                             "error": message[:1000], "error_type": type(error).__name__},
+            })
+        except Exception as audit_error:
+            raise RuntimeError("Telegram request outcome is unknown and its audit result could not be stored") from audit_error
+        raise
+    append_worker_audit_event(base_url, api_key, {
+        "event_id": f"worker:{request_id}:result", "occurred_at": datetime.now(timezone.utc).isoformat(),
+        "direction": "outbound", "kind": "telegram.request.result", "correlation_id": correlation_id,
+        "response": {"outcome": "sent", "body": response},
+    })
+    return response
+
+
 def send_game_message(bot_token: str, chat_id: str, game: dict[str, Any],
                       curated_entry: dict[str, Any], preferences: dict[str, Any],
-                      base_url: str, heading: str = "") -> None:
+                      base_url: str, heading: str = "", audit_context: dict[str, str] | None = None) -> Any:
+    def send(method: str, payload: dict[str, Any]) -> Any:
+        if not audit_context:
+            return telegram_request(bot_token, method, payload)
+        return audited_telegram_request(bot_token, method, payload, audit_context["base_url"],
+                                        audit_context["api_key"], audit_context["correlation_id"])
+
     text = (f"<b>{heading}</b>\n" if heading else "") + build_digest_message(game, curated_entry, preferences)
     payload = {"chat_id": chat_id, "parse_mode": "HTML",
                "reply_markup": {"inline_keyboard": build_inline_keyboard(str(game["fs_id"]), base_url, game, curated_entry)}}
@@ -431,27 +545,40 @@ def send_game_message(bot_token: str, chat_id: str, game: dict[str, Any],
         photo = "https:" + photo
     if photo.startswith("https://"):
         try:
-            telegram_request(bot_token, "sendPhoto", {**payload, "photo": photo, "caption": text})
-            return
+            return send("sendPhoto", {**payload, "photo": photo, "caption": text})
         except RuntimeError as error:
             # Only a definite image rejection is safe to retry as text, not a timeout.
             image_errors = ("wrong file identifier", "failed to get http url content", "photo_invalid", "image_process_failed", "wrong type of the web page content")
             if "HTTP 400" not in str(error) or not any(reason in str(error).lower() for reason in image_errors):
                 raise
             print("Telegram rejected the title image; sending the game as text.", file=sys.stderr)
-    telegram_request(bot_token, "sendMessage", {**payload, "text": text, "disable_web_page_preview": True})
+    return send("sendMessage", {**payload, "text": text, "disable_web_page_preview": True})
 
 
-def claim_daily_delivery(base_url: str, api_key: str, date: str, key: str) -> bool:
-    result = request_json(
-        f"{base_url.rstrip('/')}/api/telegram/deliveries/claim",
-        method="POST",
-        payload={"date": date, "key": key},
-        headers={"x-api-key": api_key},
-    )
+def claim_offer_delivery(base_url: str, api_key: str, event_id: str, metadata: dict[str, Any]) -> bool:
+    result = request_json(f"{base_url.rstrip('/')}/api/telegram/deliveries/claim", method="POST",
+        payload={"event_id": event_id, "metadata": metadata}, headers={"x-api-key": api_key})
     if not isinstance(result, dict) or type(result.get("claimed")) is not bool:
-        raise RuntimeError("Delivery claim API returned an invalid response")
-    return result["claimed"]
+        raise RuntimeError("Offer delivery claim API returned an invalid response")
+    if result["claimed"]:
+        return True
+    if result.get("outcome") == "sent":
+        return False
+    raise RuntimeError("Offer delivery has an unresolved prior attempt; review Telegram audit before retrying")
+
+
+def complete_offer_delivery(base_url: str, api_key: str, event_id: str, outcome: str,
+                            details: dict[str, Any]) -> None:
+    result = request_json(f"{base_url.rstrip('/')}/api/telegram/deliveries/claim", method="POST",
+        payload={"operation": "complete", "event_id": event_id, "outcome": outcome, "details": details},
+        headers={"x-api-key": api_key})
+    if not isinstance(result, dict) or result.get("outcome") != outcome:
+        raise RuntimeError("Offer delivery result was not persisted")
+
+
+def telegram_message_id(response: Any) -> Any:
+    result = response.get("result") if isinstance(response, dict) else None
+    return result.get("message_id") if isinstance(result, dict) else None
 
 
 def send_price_alerts(
@@ -460,7 +587,8 @@ def send_price_alerts(
     alerts: list[tuple[dict[str, Any], dict[str, Any]]],
     base_url: str,
     api_key: str,
-    delivery_date: str,
+    offer_states: dict[str, dict[str, Any]],
+    run_id: str,
     curated: dict[str, dict[str, Any]] | None = None,
     preferences: dict[str, Any] | None = None,
 ) -> int:
@@ -468,32 +596,80 @@ def send_price_alerts(
     for game, watch in alerts:
         fs_id = str(game["fs_id"])
         threshold = str(watch.get("threshold"))
-        if not claim_daily_delivery(base_url, api_key, delivery_date, f"alert:{fs_id}:{threshold}"):
+        state = offer_states.get(fs_id)
+        if not isinstance(state, dict) or not state.get("active"):
+            continue
+        event_id = f"alert:{fs_id}:{state['episode']}:{state['price_change_sequence']}:{state['price_cents']}"
+        metadata = {"fs_id": fs_id, "price_cents": state["price_cents"], "threshold": threshold,
+                    "episode": state["episode"], "price_change_sequence": state["price_change_sequence"]}
+        if not claim_offer_delivery(base_url, api_key, event_id, metadata):
             continue
         entry = {**(curated or {}).get(fs_id, {}), "review": f"Price alert: now below your {threshold} EUR threshold."}
-        send_game_message(bot_token, chat_id, game, entry, preferences or {}, base_url, "Price alert")
+        try:
+            response = send_game_message(bot_token, chat_id, game, entry, preferences or {}, base_url, "Price alert",
+                {"base_url": base_url, "api_key": api_key, "correlation_id": f"{run_id}:{event_id}"})
+            complete_offer_delivery(base_url, api_key, event_id, "sent", {"message_id": telegram_message_id(response)})
+        except Exception:
+            complete_offer_delivery(base_url, api_key, event_id, "unknown", {})
+            raise
         sent += 1
     return sent
 
 
-def send_digest(
+def send_offer_events(
     bot_token: str,
     chat_id: str,
     games: list[dict[str, Any]],
+    events: list[dict[str, Any]],
+    eligible_ids: list[str],
     curated: dict[str, dict[str, Any]],
     preferences: dict[str, Any],
     base_url: str,
     api_key: str,
-    delivery_date: str,
-) -> int:
-    sent = 0
-    for game in games:
-        fs_id = str(game["fs_id"])
-        if not claim_daily_delivery(base_url, api_key, delivery_date, f"digest:{fs_id}"):
+    run_id: str,
+) -> dict[str, int]:
+    by_id = {str(game["fs_id"]): game for game in games}
+    curated_ids = {str(game["fs_id"]) for game in select_digest_games(games, curated, preferences)}
+    eligible = set(eligible_ids)
+    transition_by_id = {event["fs_id"]: event for event in events}
+    selected_ids = [fs_id for fs_id in transition_by_id if fs_id in eligible or fs_id in curated_ids]
+    selected_ids.sort(key=lambda fs_id: (-float(by_id[fs_id].get("price_discount_percentage_f") or 0), fs_id))
+
+    headings = {"new": "New deal", "price_changed": "Offer price changed", "reentered": "Offer returned"}
+    counts = {
+        "offer_messages_sent": 0,
+        "new_deals_sent": 0,
+        "price_changed_deals_sent": 0,
+        "reentered_deals_sent": 0,
+        "digest_messages_sent": 0,
+    }
+    for fs_id in selected_ids:
+        event = transition_by_id[fs_id]
+        game = by_id[fs_id]
+        event_id = f"offer:{fs_id}:{event['episode']}:{event['price_change_sequence']}:{event['price_cents']}"
+        metadata = {key: event[key] for key in ("fs_id", "kind", "previous_price_cents", "price_cents", "episode", "price_change_sequence")}
+        if not claim_offer_delivery(base_url, api_key, event_id, metadata):
             continue
-        send_game_message(bot_token, chat_id, game, curated[fs_id], preferences, base_url)
-        sent += 1
-    return sent
+        if counts["offer_messages_sent"]:
+            time.sleep(1)
+        try:
+            response = send_game_message(bot_token, chat_id, game, curated.get(fs_id, {}), preferences, base_url,
+                headings[event["kind"]], {"base_url": base_url, "api_key": api_key,
+                                          "correlation_id": f"{run_id}:{event_id}"})
+            complete_offer_delivery(base_url, api_key, event_id, "sent", {"message_id": telegram_message_id(response)})
+        except Exception:
+            complete_offer_delivery(base_url, api_key, event_id, "unknown", {})
+            raise
+        counts["offer_messages_sent"] += 1
+        sent_key = {
+            "new": "new_deals_sent",
+            "price_changed": "price_changed_deals_sent",
+            "reentered": "reentered_deals_sent",
+        }[event["kind"]]
+        counts[sent_key] += 1
+        if fs_id in curated_ids:
+            counts["digest_messages_sent"] += 1
+    return counts
 
 
 def compare_deal_arrivals(base_url: str, api_key: str, games: list[dict[str, Any]]) -> dict[str, Any]:
@@ -509,7 +685,9 @@ def compare_deal_arrivals(base_url: str, api_key: str, games: list[dict[str, Any
             "system_type": systems if isinstance(systems, list) else [systems]})
     result = request_json(f"{base_url.rstrip('/')}/api/telegram/deals", method="POST",
                           payload={"games": catalog, "total": len(catalog)}, headers={"x-api-key": api_key}, timeout=45)
-    if not isinstance(result, dict) or type(result.get("initialized")) is not bool or not (
+    if not isinstance(result, dict) or type(result.get("initialized")) is not bool \
+            or type(result.get("baseline")) is not bool or not isinstance(result.get("offers"), dict) \
+            or not isinstance(result.get("events"), list) or not (
         result.get("etag") is None or isinstance(result.get("etag"), str)
     ):
         raise RuntimeError("Invalid deal comparison response")
@@ -519,26 +697,25 @@ def compare_deal_arrivals(base_url: str, api_key: str, games: list[dict[str, Any
             raise RuntimeError("Invalid deal comparison IDs")
     if not set(result["newIds"]).issubset(result["eligibleIds"]) or not set(result["eligibleIds"]).issubset(str(game["fs_id"]) for game in games):
         raise RuntimeError("Deal comparison IDs do not match the catalog")
+    seen_events: set[str] = set()
+    for event in result["events"]:
+        if not isinstance(event, dict) or event.get("kind") not in {"new", "price_changed", "reentered"} \
+                or not isinstance(event.get("fs_id"), str) or not event["fs_id"].isdigit() \
+                or event["fs_id"] in seen_events or not all(type(event.get(key)) is int for key in
+                    ("price_cents", "episode", "price_change_sequence")):
+            raise RuntimeError("Invalid offer transition event")
+        seen_events.add(event["fs_id"])
     return result
 
 
-def send_new_deals(bot_token: str, chat_id: str, games: list[dict[str, Any]], curated: dict[str, dict[str, Any]],
-                   preferences: dict[str, Any], base_url: str, api_key: str, delivery_date: str) -> int:
-    sent = 0
-    for game in sorted(games, key=lambda item: (-float(item.get("price_discount_percentage_f") or 0), str(item["fs_id"]))):
-        fs_id = str(game["fs_id"])
-        if not claim_daily_delivery(base_url, api_key, delivery_date, f"deal:{fs_id}"):
-            query = urllib.parse.urlencode({"date": delivery_date, "key": f"sent:deal:{fs_id}"})
-            confirmed = request_json(f"{base_url.rstrip('/')}/api/telegram/deliveries/claim?{query}", headers={"x-api-key": api_key})
-            if not isinstance(confirmed, dict) or confirmed.get("claimed") is not True:
-                raise RuntimeError("A new-deal delivery was claimed but not confirmed; review Telegram before retrying")
-            continue
-        if sent:
-            time.sleep(1)  # Telegram limits messages to one chat; pace larger daily arrivals.
-        send_game_message(bot_token, chat_id, game, curated.get(fs_id, {}), preferences, base_url, "New deal")
-        claim_daily_delivery(base_url, api_key, delivery_date, f"sent:deal:{fs_id}")
-        sent += 1
-    return sent
+def publish_offer_end_dates(base_url: str, api_key: str, checked_at: str,
+                            records: dict[str, dict[str, Any]]) -> None:
+    current = request_json(f"{base_url.rstrip('/')}/api/offer-end-dates", headers={"x-api-key": api_key})
+    if not isinstance(current, dict) or not (current.get("etag") is None or isinstance(current.get("etag"), str)):
+        raise RuntimeError("Invalid offer end-date snapshot response")
+    request_json(f"{base_url.rstrip('/')}/api/offer-end-dates", method="PUT",
+        payload={"checked_at": checked_at, "records": records, "etag": current.get("etag")},
+        headers={"x-api-key": api_key}, timeout=45)
 
 
 def run() -> dict[str, int]:
@@ -564,15 +741,35 @@ def run() -> dict[str, int]:
         raise RuntimeError("Curated API must return separate Nintendo Life and NT Deals maps")
     watched_games = len(preferences.get("watchGames", {}))
     games = fetch_watched_games(games, preferences)
+    offer_checked_at = datetime.now(timezone.utc)
+    try:
+        offer_end_dates = fetch_offer_end_dates(games, offer_checked_at)
+        offer_end_date_refresh_failed = 0
+    except Exception as error:
+        print(f"Nintendo offer end-date refresh unavailable: {type(error).__name__}", file=sys.stderr)
+        offer_end_dates = {}
+        offer_end_date_refresh_failed = 1
     for game in games:
-        entry = steam.get(str(game["fs_id"]))
-        game["steam_url"] = steam_store_url(entry.get("url"), entry.get("steam_id")) if isinstance(entry, dict) else ""
+        fs_id = str(game["fs_id"])
+        steam_entry = steam.get(fs_id)
+        game["steam_url"] = steam_store_url(steam_entry.get("url"), steam_entry.get("steam_id")) if isinstance(steam_entry, dict) else ""
+        if isinstance(steam_entry, dict):
+            game["steam_rating"] = steam_entry
+        if isinstance(ratings.get(fs_id), dict):
+            game["igdb_rating"] = ratings[fs_id]
+        end_entry = offer_end_dates.get(fs_id)
+        if isinstance(end_entry, dict) and end_entry.get("price_cents") == round(float(game.get("price_discounted_f") or 0) * 100):
+            game["offer_end_date"] = end_entry.get("end_datetime")
 
     RUN_STAGE = "igdb_enrichment"
     client_id = require_env("TWITCH_CLIENT_ID")
     client_secret = require_env("TWITCH_CLIENT_SECRET")
     updates = enrich_ratings(games, ratings, client_id, client_secret)
     merged_ratings = {**ratings, **updates}
+    for game in games:
+        rating = merged_ratings.get(str(game["fs_id"]))
+        if isinstance(rating, dict):
+            game["igdb_rating"] = rating
 
     alerts = find_price_alerts(games, preferences)
     digest_games = select_digest_games(games, curated, preferences)
@@ -586,10 +783,12 @@ def run() -> dict[str, int]:
         "rating_updates": len(updates),
         "price_alerts": len(alerts),
         "digest_items": len(digest_games),
+        "offer_end_dates": len(offer_end_dates),
+        "offer_end_date_refresh_failed": offer_end_date_refresh_failed,
     }
 
     ratings_api_key = require_env("RATINGS_API_KEY")
-    delivery_date = datetime.now(ZoneInfo("Europe/Madrid")).date().isoformat()
+    run_id = uuid4().hex
     RUN_STAGE = "ratings_publish"
     if updates and not dry_run:
         request_json(
@@ -599,13 +798,27 @@ def run() -> dict[str, int]:
             headers={"x-api-key": ratings_api_key},
             timeout=45,
         )
+    if offer_end_date_refresh_failed == 0 and not dry_run:
+        RUN_STAGE = "offer_end_date_publish"
+        try:
+            publish_offer_end_dates(base_url, ratings_api_key,
+                offer_checked_at.isoformat().replace("+00:00", "Z"), offer_end_dates)
+        except Exception as error:
+            print(f"Nintendo offer end-date publication unavailable: {type(error).__name__}", file=sys.stderr)
+            summary["offer_end_date_refresh_failed"] = 1
     RUN_STAGE = "deal_arrival_comparison"
-    arrivals = compare_deal_arrivals(base_url, ratings_api_key, catalog_games)
-    new_ids = set(arrivals["newIds"])
-    summary.update({"eligible_deals": len(arrivals["eligibleIds"]), "new_deals": len(new_ids),
-                    "deals_baseline_initialized": int(not arrivals["initialized"])})
-    digest_games = [game for game in digest_games if str(game["fs_id"]) not in new_ids]
-    summary["digest_items"] = len(digest_games)
+    # Direct watched-ID lookups are a notification backstop even when the full query omitted that game.
+    arrivals = compare_deal_arrivals(base_url, ratings_api_key, games)
+    event_kinds = [event["kind"] for event in arrivals["events"]]
+    event_ids = {event["fs_id"] for event in arrivals["events"]}
+    curated_event_ids = {str(game["fs_id"]) for game in digest_games if str(game["fs_id"]) in event_ids}
+    summary.update({"eligible_deals": len(arrivals["eligibleIds"]),
+                    "new_deals": event_kinds.count("new"),
+                    "price_changed_deals": event_kinds.count("price_changed"),
+                    "reentered_deals": event_kinds.count("reentered"),
+                    "offer_events": len(arrivals["events"]),
+                    "digest_items": len(curated_event_ids),
+                    "deals_baseline_initialized": int(arrivals["baseline"])})
     if dry_run:
         summary["duration_seconds"] = int(time.monotonic() - RUN_STARTED_AT)
         write_redacted_summary(summary)
@@ -614,20 +827,16 @@ def run() -> dict[str, int]:
     bot_token = require_env("TELEGRAM_BOT_TOKEN")
     chat_id = require_env("TELEGRAM_CHAT_ID")
     RUN_STAGE = "new_deal_delivery"
-    summary["new_deals_sent"] = send_new_deals(bot_token, chat_id,
-        [game for game in catalog_games if str(game["fs_id"]) in new_ids], curated, preferences,
-        base_url, ratings_api_key, delivery_date)
+    summary.update(send_offer_events(bot_token, chat_id, catalog_games, arrivals["events"],
+        arrivals["eligibleIds"], curated, preferences, base_url, ratings_api_key, run_id))
     RUN_STAGE = "price_alert_delivery"
     summary["price_alerts_sent"] = send_price_alerts(
-        bot_token, chat_id, alerts, base_url, ratings_api_key, delivery_date, curated, preferences
-    )
-    RUN_STAGE = "digest_delivery"
-    summary["digest_messages_sent"] = send_digest(
-        bot_token, chat_id, digest_games, curated, preferences, base_url, ratings_api_key, delivery_date
+        bot_token, chat_id, alerts, base_url, ratings_api_key, arrivals["offers"], run_id, curated, preferences
     )
     RUN_STAGE = "deal_snapshot_commit"
     request_json(f"{base_url.rstrip('/')}/api/telegram/deals", method="PUT",
-                 payload={"eligibleIds": arrivals["eligibleIds"], "etag": arrivals["etag"], "date": delivery_date},
+                 payload={"eligibleIds": arrivals["eligibleIds"], "offers": arrivals["offers"],
+                          "etag": arrivals["etag"], "date": datetime.now(ZoneInfo("Europe/Madrid")).date().isoformat()},
                  headers={"x-api-key": ratings_api_key})
     summary["duration_seconds"] = int(time.monotonic() - RUN_STARTED_AT)
     RUN_STAGE = "complete"

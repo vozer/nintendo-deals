@@ -61,3 +61,27 @@ The correction changes description fallback only, not the existing English categ
 - Authenticated `GET /api/game?fs_id=3151132` returns 200, Future Knight, `excerpt_language: en`, with the official English description. `GET /api/media` and `/api/steam` return 200, parseable maps and ETag headers.
 - CLI `list --json` was unsupported; normal `list` worked. Initial game smoke used an incorrect `id` parameter and correctly received 400; the documented `fs_id` request passed. Neither error was a production application failure.
 - No production browser mutation tests, enrichment runs, preference writes, Telegram sends or webhook changes performed. Remaining Safari/source-coverage gates above are unchanged; deployment does not populate absent media caches.
+
+## Extended Production Test: 2026-09-30
+
+User requested production verification after deployment. Tested the real production site in headed Chromium using an isolated signed session from the existing local production configuration; no password, token or session was saved in this report. All application requests were reads. No save/hide/watch/thinking control was clicked.
+
+### Passed
+
+- Unauthenticated deep link preserves `game=3151132` through the login redirect. Authenticated deep link opens Future Knight's actual dialog. English description, English categories, correct 11.99 EUR sale price and additive Nintendo/Nintendo Life links appear. Its existing below-5-EUR alert is selected, with Remove alert present.
+- Real 375x812 and 1200x900 layouts inspected visually: cover loads, action buttons wrap, dialog scrolls, no horizontal document or dialog overflow. Screenshots retained locally under `output/playwright/production-detail-{375,1200}.png`.
+- Tab remains inside the modal. Card keyboard activation (Axiom Verge, Enter) opens details, and Escape restores focus to that card opener. Axe audit of the live Future Knight dialog reports zero violations and 20 passing rules.
+- Blaster Master Zero (`1204623`): six screenshots and thumbnails load; Next screenshot changes the main image to screenshot 2 without stealing focus. Trailer selection replaces the image with the real YouTube privacy-enhanced player. Explicit Play starts playback, with current time advancing beyond three seconds, readyState 4 and no media error. Canonical Steam Reviews link is present alongside Nintendo, IGDB and source links. The page has 34 rendered Steam tile links.
+- Production preferences/media/Steam/curated reads and two catalog pages return 200; media/Steam ETags exist. Catalog pages at offsets 0/3 and search `mario` pages at offsets 0/3 are disjoint; search returns three games each with total 272.
+- All 48 initially rendered Deals card IDs were checked against current preferences: zero hidden, watched or Thinking leaks. Preferences SHA-256 before/after the test matches; counts remain 157 hidden, 11 watched and four Thinking. No user preference entry changed.
+- Application console contains no errors in the tested gallery flow. Actual external video playback was tested, not only iframe presence.
+
+### Findings and Unverified Boundaries
+
+1. **Missing enrichment, not complete end-to-end:** Future Knight has neither a media record nor a Steam rating/match record in production. Consequently it has a cover but no gallery/trailer or Steam button. The UI cannot create absent provider data. An explicitly authorized, reviewed additive production backfill remains necessary.
+2. **Legacy media matching issue:** Blaster Master Zero's cached IGDB URL points to `blaster-master-zero-ex-character---shantae`, not the base game. Its video is the official Version 1.3 update trailer. The screenshot/player UI works, but this cached provider association is not a validated base-game association. This test did not change that record or claim its rating data is wrong.
+3. **Direct-link keyboard focus regression:** fixed in the current local release candidate. Modal cleanup treats BODY as having no usable opener and moves focus to the game-search field; the synthetic Playwright suite checks Escape and close-button focus restoration after both login-preserved and already-authenticated `?game=` deep links. Production keyboard focus remains unverified until this candidate is deployed and checked read-only.
+4. **Presentation improvement:** an empty Media selection strip remains below Future Knight's cover, and legacy NT Deals context for the non-sale Blaster Master Zero displays 50% off / zero days left. Neither was represented as a current Nintendo price; hiding empty controls and labeling stale source context would make the UI clearer.
+5. **Not tested against production:** preference persistence/retry/denied-write paths, Telegram callbacks or notifications, maintenance publication, actual HLS/direct-video sources and Safari/native-WebKit. Their deterministic local evidence remains in the earlier verification section; no real production mutation was used as a test.
+
+Test tooling corrections: the CLI sandbox cannot require Node modules, so signed-session setup was performed externally without exposing credentials; the installed CLI uses `requests`, not `network`. The initial card audit incorrectly targeted native buttons instead of the existing role-button divs and returned zero cards; corrected audit asserted 48 cards before evaluating exclusions. These were harness errors, not production passes or application failures.

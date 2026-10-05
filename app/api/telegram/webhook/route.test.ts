@@ -9,6 +9,31 @@ const state = vi.hoisted(() => ({
   failWrites: false,
   failEdits: 0,
   failReplies: 0,
+  auditEvents: [] as Array<Record<string, unknown>>,
+  permanentDeliveries: new Map<string, { outcome: string | null; message_id: number | null }>(),
+}));
+
+vi.mock('@/lib/telegram-audit-storage', () => ({
+  appendTelegramAuditEvent: vi.fn(async (event: Record<string, unknown>) => {
+    state.auditEvents.push(event);
+    return { created: true };
+  }),
+  claimTelegramDelivery: vi.fn(async (eventId: string) => {
+    const existing = state.permanentDeliveries.get(eventId);
+    if (existing) return { claimed: false, outcome: existing.outcome ?? 'unknown', message_id: existing.message_id };
+    state.permanentDeliveries.set(eventId, { outcome: null, message_id: null });
+    return { claimed: true, outcome: null, message_id: null };
+  }),
+  completeTelegramDelivery: vi.fn(async (eventId: string, outcome: string, details: Record<string, unknown>) => {
+    const result = state.permanentDeliveries.get(eventId)!;
+    if (!result.outcome) {
+      result.outcome = outcome;
+      result.message_id = Number(details.message_id) || null;
+    }
+    return { completed: true, ...result };
+  }),
+  getTelegramDelivery: vi.fn(),
+  listTelegramAuditEvents: vi.fn(),
 }));
 
 vi.mock('@vercel/blob', () => ({
@@ -74,6 +99,8 @@ beforeEach(() => {
   state.failWrites = false;
   state.failEdits = 0;
   state.failReplies = 0;
+  state.auditEvents = [];
+  state.permanentDeliveries.clear();
   process.env.TELEGRAM_WEBHOOK_SECRET = 'test-webhook-secret';
   process.env.TELEGRAM_BOT_TOKEN = 'test-bot-token';
   process.env.NINTENDO_TELEGRAM_CHAT_ID = '88';
@@ -179,6 +206,11 @@ describe('Telegram callback webhook', () => {
     const document = JSON.parse(state.raw!);
     expect(document.preferences.hiddenGames).toEqual(['1001']);
     expect(document.telegram.processedUpdateIds).toEqual(['callback-unique-1']);
+    expect(state.auditEvents.some(event => event.kind === 'webhook.update.received')).toBe(true);
+    expect(state.auditEvents.some(event => event.kind === 'preference.action.persisted')).toBe(true);
+    expect(state.auditEvents.some(event => event.kind === 'webhook.action.completed')).toBe(true);
+    expect(state.auditEvents.filter(event => event.kind === 'telegram.request.attempt')).toHaveLength(4);
+    expect(state.auditEvents.filter(event => event.kind === 'telegram.request.result')).toHaveLength(4);
   });
 
   it('does not acknowledge when preference persistence fails', async () => {

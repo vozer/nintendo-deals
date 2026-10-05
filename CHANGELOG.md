@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-01 - Crash-Safe Media Crawl (Local)
+
+- Replaced end-only media staging with per-game durable SQLite checkpoints, frozen run inputs, resume/export/retry-incomplete commands, and provider outcome records.
+- Made publication a separate reviewed resume action; incomplete runs are refused and Vercel request/projected response sizes are preflighted before writes.
+- The existing interrupted 1,500-game run remains unrecoverable because its assets were never persisted; a fresh full acquisition is required.
+
+## 2026-10-01 - Detail Remediation (Local)
+
+- Validate IGDB media identity instead of trusting cached rating IDs; preserve old assets and superseded links, with frozen rating scores unchanged.
+- Restore direct-link/removed-opener focus to search, omit empty media controls, and label historical NT Deals offers.
+- Existing media crawler can emit non-overwriting before/after staging evidence; no new scheduled enrichment job. Two real production-targeted acquisitions were staged without publication or preference/Telegram mutations. See `docs/plans/2026-10-01-detail-remediation-delivery.md`.
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
@@ -7,6 +19,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+
+- Locally implemented permanent private Telegram auditing with redacted inbound updates and outbound Bot API request/results, bounded date/direction/kind/correlation/text history filters, and delivery replay claims independent of preferences.
+- Replaced date-based repeated offer notifications with complete-snapshot game/price transition identities; unchanged offers stay quiet, while price changes and observed discount re-entry can notify. Run summaries now distinguish actual sends by transition kind and curated context.
+- Added official Nintendo offer-end-date refresh/publishing, matching by Nintendo ID and exact discounted cents; tiles and Telegram messages show the date only while the source snapshot is fresh and the sale is current. Watched alerts now require Nintendo's explicit active-discount flag.
 
 - Locally implemented the approved game-detail upgrade: shared Hide/Unhide/Thinking/price-alert controls, truthful save/error feedback, stable dialog focus, English descriptions with Spanish fallback, and canonical Steam links independent of review scores.
 - Repaired media/Steam CLI imports and Nintendo page-URL acquisition. Manual bounded maintenance merges Nintendo/IGDB/validated Steam screenshots and multiple videos with provenance, PC labels, incomplete-state reporting, and cached-media preservation.

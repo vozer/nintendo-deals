@@ -61,7 +61,7 @@ npm run dev
 | `components/GameCard.tsx` | Game card with hide/watch buttons, rating badges, media indicators, IGDB link |
 | `components/GameDetailModal.tsx` | Fullscreen detail modal with screenshot carousel, YouTube embed, game info |
 | `components/DealsClient.tsx` | Main page: 5 tabs, grid, search, sort, optimistic updates, ratings/media integration |
-| `scripts/media-backfill.py` | Backfill media for all games: Nintendo scraping + IGDB fallback, incremental saves |
+| `scripts/media-backfill.py` | Backfill media with per-game SQLite checkpoints, resume, and staged manifests |
 | `automation/` | One-shot daily ratings, price-alert, and curated-digest worker |
 | `.github/workflows/nintendo-deals-daily.yml` | DST-safe daily worker schedule and manual replay |
 | `vercel.json` | Vercel config: region, headers, build settings |
@@ -94,7 +94,7 @@ Collections and Sports tabs fetch directly from Nintendo Solr API with tab-speci
 - **Videos**: YouTube trailers from IGDB (Nintendo Limelight videos not embeddable — DNS/service issues)
 - **Frontend**: Click game tile → detail modal with screenshot carousel + YouTube embed + IGDB link
 - **Indicators**: Game tiles show screenshot count and trailer availability badges
-- **Backfill**: `scripts/media-backfill.py` — processes all games, incremental saves every 50 games
+- **Backfill**: `scripts/media-backfill.py` — commits each game's merged media and provider status to an ignored local SQLite run checkpoint before progress is reported; resume with `--resume <run-dir>`
 - **Coverage**: ~99% of games have screenshots, ~71% have YouTube trailers
 
 ## Telegram Alerts
@@ -195,3 +195,13 @@ The replacement is:
 
 - [README.md](README.md) — Setup and usage
 - [CHANGELOG.md](CHANGELOG.md) — Version history
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

@@ -21,6 +21,16 @@ export interface NintendoGame {
   price_lowest_f: number;
 }
 
+export interface OfferEndDate {
+  price_cents: number;
+  end_datetime: string;
+}
+
+export interface OfferEndDatesSnapshot {
+  checked_at: string | null;
+  records: Record<string, OfferEndDate>;
+}
+
 export interface Preferences {
   hiddenGames: string[];
   watchGames: Record<
@@ -66,6 +76,8 @@ export interface GameMedia {
   last_updated: string;
   asset_sources?: Record<string, 'nintendo' | 'igdb' | 'steam'>;
   steam_match?: { steam_id: number; matched_title: string; publisher: string; last_updated: string };
+  igdb_match?: { igdb_id: number; matched_title: string; url: string; last_updated: string };
+  legacy_igdb_url?: string;
   collection_complete?: boolean;
 }
 

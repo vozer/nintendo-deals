@@ -1,4 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { appendTelegramAuditEvent } from './telegram-audit-storage';
 
 export type TelegramAction =
   | { action: 'hide'; fs_id: string }
@@ -70,22 +72,49 @@ export async function telegramRequest(
   botToken: string,
   method: string,
   payload: Record<string, unknown>,
+  context: { source?: string; correlation_id?: string } = {},
 ): Promise<Record<string, unknown>> {
-  const response = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+  const requestId = randomUUID();
+  const timestamp = new Date().toISOString();
+  const auditContext = { source: context.source || 'vercel_webhook', ...context };
+  await appendTelegramAuditEvent({
+    event_id: `telegram-request:${requestId}:attempt`, occurred_at: timestamp, direction: 'outbound',
+    kind: 'telegram.request.attempt', correlation_id: context.correlation_id,
+    request: { ...auditContext, method, payload },
   });
-  const data = await response.json() as Record<string, unknown>;
+
+  let responseStatus: number | null = null;
+  let data: Record<string, unknown>;
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    responseStatus = response.status;
+    data = await response.json() as Record<string, unknown>;
+  } catch (error) {
+    await appendTelegramAuditEvent({
+      event_id: `telegram-request:${requestId}:result`, occurred_at: new Date().toISOString(), direction: 'outbound',
+      kind: 'telegram.request.result', correlation_id: context.correlation_id,
+      response: { outcome: 'unknown', http_status: responseStatus, error: error instanceof Error ? error.message : 'NetworkError' },
+    });
+    throw error;
+  }
+
+  const isNotModified = typeof data.description === 'string' && data.description.toLowerCase().includes('message is not modified');
+  await appendTelegramAuditEvent({
+    event_id: `telegram-request:${requestId}:result`, occurred_at: new Date().toISOString(), direction: 'outbound',
+    kind: 'telegram.request.result', correlation_id: context.correlation_id,
+    response: { outcome: responseStatus < 300 && data.ok === true || isNotModified ? 'sent' : 'rejected',
+      http_status: responseStatus, body: data },
+  });
   if (
     ['editMessageText', 'editMessageCaption'].includes(method) &&
-    typeof data.description === 'string' &&
-    data.description.toLowerCase().includes('message is not modified')
+    isNotModified
   ) {
     return data;
   }
-  if (!response.ok || data.ok !== true) {
-    throw new Error(`Telegram ${method} failed with HTTP ${response.status}`);
+  if (!responseStatus || responseStatus >= 300 || data.ok !== true) {
+    throw new Error(`Telegram ${method} failed with HTTP ${responseStatus ?? 'unknown'}`);
   }
   return data;
 }

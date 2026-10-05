@@ -50,14 +50,19 @@ async function stubLocalApis(page: import('@playwright/test').Page) {
           source_url: 'https://example.test/deal',
           source: 'ntdeals',
           source_price_eur: 4.99,
+          days_remaining: 0,
         },
       },
     },
   }));
+  await page.route('**/api/offer-end-dates', (route) => route.fulfill({ json: {
+    checked_at: new Date().toISOString(),
+    records: { [game.fs_id]: { price_cents: 499, end_datetime: new Date(Date.now() + 10 * 86_400_000).toISOString() } },
+  } }));
 }
 
 for (const viewport of [{ width: 375, height: 812 }, { width: 1200, height: 900 }]) {
-  test(`details share persistent actions, Steam links and playable media at ${viewport.width}px`, async ({ page }) => {
+  test(`details share persistent actions, Steam links and playable media at ${viewport.width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
     if (viewport.width === 375) await page.addInitScript(() => {
       const native = HTMLMediaElement.prototype.canPlayType;
@@ -108,6 +113,7 @@ for (const viewport of [{ width: 375, height: 812 }, { width: 1200, height: 900 
     await page.getByRole('button', { name: 'Enter', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: game.title });
     await expect(dialog.getByRole('button', { name: 'Screenshots (2)' })).toBeVisible();
+    await expect(page.getByText(/^Offer ends /).first()).toBeVisible();
     await expect(dialog.getByRole('link', { name: 'Steam Reviews' })).toHaveAttribute('href', 'https://store.steampowered.com/app/4235410/');
     await expect(page.getByRole('link', { name: 'Steam', exact: true })).toHaveCount(1);
     expect(mutations).toHaveLength(0);
@@ -148,14 +154,14 @@ for (const viewport of [{ width: 375, height: 812 }, { width: 1200, height: 900 
     await page.addScriptTag({ content: axe.source });
     expect(await page.evaluate(async () => (await (window as unknown as { axe: typeof axe }).axe.run(document)).violations.filter((issue) => issue.impact === 'serious' || issue.impact === 'critical').map((issue) => issue.id))).toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
-    await page.screenshot({ path: `test-results/detail-upgrade-${viewport.width}.png` });
+    await page.screenshot({ path: testInfo.outputPath(`detail-upgrade-${viewport.width}.png`) });
     await page.keyboard.press('Escape');
     const opener = page.getByRole('button', { name: `View details for ${game.title}` });
     await opener.click();
     await dialog.getByRole('button', { name: 'Hide', exact: true }).click();
     await expect(dialog.getByRole('button', { name: 'Unhide', exact: true })).toBeVisible();
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('button', { name: 'Logout' })).toBeFocused();
+    await expect(page.getByPlaceholder('Search games...')).toBeFocused();
   });
   test(`login preserves game deep link and dialog is usable at ${viewport.width}px`, async ({ page }) => {
     await page.setViewportSize(viewport);
@@ -186,6 +192,8 @@ for (const viewport of [{ width: 375, height: 812 }, { width: 1200, height: 900 
     expect(seriousViolations).toEqual([]);
     await expect(dialog.getByText('A synthetic editorial note.')).toBeVisible();
     await expect(dialog.getByText('NT Deals', { exact: true })).toBeVisible();
+    await expect(dialog.getByText(/Historical NT Deals offer:/)).toBeVisible();
+    await expect(dialog.getByRole('group', { name: 'Media selection' })).toHaveCount(0);
     await expect(dialog.getByRole('button', { name: 'Close game details' })).toBeFocused();
 
     const pageWidth = await page.evaluate(() => document.documentElement.scrollWidth);
@@ -198,5 +206,10 @@ for (const viewport of [{ width: 375, height: 812 }, { width: 1200, height: 900 
 
     await page.keyboard.press('Escape');
     await expect(dialog).not.toBeVisible();
+    await expect(page.getByPlaceholder('Search games...')).toBeFocused();
+    await page.goto('/?game=1337462');
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'Close game details' }).click();
+    await expect(page.getByPlaceholder('Search games...')).toBeFocused();
   });
 }
