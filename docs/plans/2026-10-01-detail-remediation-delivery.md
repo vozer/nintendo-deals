@@ -2,9 +2,9 @@
 
 ## Scope
 
-User approved matching/focus/presentation repairs but rejected new scheduled enrichment orchestration: use the existing crawler instead. No new GitHub Actions workflow/job/schedule or service was added. Stable affected IDs: FR-004/FR-009, NFR-009; UC-002/UC-004; GAME_MEDIA/MEDIA_ASSET. Code/specification changes are local, not committed/pushed/deployed.
+User approved matching/focus/presentation repairs but rejected new scheduled enrichment orchestration: use the existing crawler instead. No new GitHub Actions workflow/job/schedule or service was added. Stable affected IDs: FR-004/FR-009, NFR-009; UC-002/UC-004; GAME_MEDIA/MEDIA_ASSET. At initial handoff, code/specification changes were local. The UI/code portion was later committed and deployed in `f58ab2e` on 2026-10-05; crawler publication remains separate.
 
-Production staging is limited to the previously investigated Nintendo IDs `3151132` and `1204623`, against `https://nintendo-deals.vercel.app`, using the actual existing media CLI and authenticated IGDB acquisition. Full eligible catalog versus two-game production publication was presented as a scope question and remains unresolved. No production apply, preference write, rating update, Telegram send, webhook change or credential rotation occurred.
+Initial staging investigated Nintendo IDs `3151132` and `1204623` against `https://nintendo-deals.vercel.app`, using the existing media CLI and authenticated IGDB acquisition. That two-game exploration was superseded by the user's 2026-10-01 approval for a full currently eligible original-Switch catalog crawl, recorded in [the full media crawl plan](2026-10-01-full-media-crawl.md). No production apply, preference write, rating update, Telegram send, webhook change or credential rotation occurred.
 
 ## Implemented
 
@@ -41,12 +41,12 @@ Full before/after entries, including every asset URL, are retained in non-overwr
 
 These are JSON recovery/staging records, not downloads of remote media. Counts/bytes above refer to JSON publications. The combined publication payload must be serialized and checked before applying; the two single-key byte counts cannot simply be presented as the byte length of a combined map. A reviewed non-overwriting durable recovery copy is required before replacing an existing association.
 
-Production preferences SHA-256 matches before/after acquisition: 157 hidden, 11 watched, four Thinking. No preferences API write occurred. Production still runs code `2887f22`; new UI repairs are not live yet.
+Production preferences SHA-256 matched before/after acquisition: 157 hidden, 11 watched, four Thinking. No preferences API write occurred. Production now runs code `f58ab2e`; deployment did not publish the crawler's staged media or modify the production `media.json` snapshot.
 
 ## Remaining Approval and Validation
 
-- Confirm crawler publication scope: full currently eligible original-Switch catalog or these two investigated games. Full-catalog selection includes active discounted original Switch games within the existing price/language/digital policy; targeted ID mode can inspect a non-sale original Switch game.
+- Full currently eligible original-Switch crawl scope is approved. Full-catalog selection includes active discounted original Switch games within the existing price/language/digital policy; targeted ID mode can inspect a non-sale original Switch game.
 - Exact reviewed manifest approval is required before the existing link replacement. A broad instruction to update does not authorize deleting assets or bypassing revision checks. No bulk legacy migration or frozen-rating rematch is included.
-- Commit/push and production code deployment remain separate delivery states; push is preview only. After approved publication/promotion, run read-only real-source image/video/link and focus checks. No production preference-mutation tests.
+- Code commit/push/deployment completed as `f58ab2e`; production alias is Ready. The full-catalog crawl and any publication remain separate: require a successful complete crawl, exact reviewed manifest and current If-Match revision before `--apply`. After publication, run read-only real-source image/video/link and focus checks. Do not use production preference-mutation tests.
 
 Reflection: the user's correction removed unnecessary scheduling work. Keep render fixes, existing acquisition, validated identity and production publication evidence separate; actual crawler staging is complete but is not an applied production repair.
