@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import gzip
+import math
 import os
 import re
 import sys
@@ -12,6 +14,7 @@ import urllib.parse
 from calendar import monthrange
 import urllib.request
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 from uuid import uuid4
@@ -68,7 +71,9 @@ SOLR_FIELDS = ",".join(
     ]
 )
 SUMMARY_FIELDS = (
-    "catalog_records", "games", "watched_games", "ratings_records",
+    "catalog_records", "catalog_pages", "catalog_documents_received", "catalog_expected_total",
+    "games", "watched_games", "watched_games_added", "watched_lookup_errors",
+    "ratings_records", "steam_records", "igdb_enrichment_failures", "igdb_game_errors",
     "nintendolife_entries", "ntdeals_entries", "rating_updates",
     "price_alerts", "digest_items", "price_alerts_sent", "digest_messages_sent",
     "new_deals", "new_deals_sent", "price_changed_deals", "price_changed_deals_sent",
@@ -77,6 +82,11 @@ SUMMARY_FIELDS = (
 )
 RUN_STAGE = "startup"
 RUN_STARTED_AT = time.monotonic()
+RUN_STARTED_AT_UTC = ""
+RUN_STAGES: list[dict[str, Any]] = []
+RUN_METRICS: dict[str, int] = {}
+RUN_PRIVATE_EVIDENCE: dict[str, Any] = {}
+RUN_STAGE_STARTED_AT = 0.0
 
 
 def require_env(name: str) -> str:
@@ -86,15 +96,111 @@ def require_env(name: str) -> str:
     return value
 
 
+def atomic_write_json(path: Path, value: Any, compressed: bool = False) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    opener = gzip.open if compressed else open
+    with opener(temporary, "wt", encoding="utf-8") as output:
+        json.dump(value, output, separators=(",", ":") if compressed else None, sort_keys=not compressed)
+    os.replace(temporary, path)
+
+
 def write_redacted_summary(summary: dict[str, Any]) -> None:
     path = os.environ.get("NINTENDO_DEALS_SUMMARY_PATH", "").strip()
     if path:
         safe = {key: value for key, value in summary.items() if key in SUMMARY_FIELDS and type(value) is int}
+        safe.update({key: value for key, value in summary.items() if key in {
+            "status", "failure_type", "failure_message", "run_id", "run_attempt"
+        } and isinstance(value, str)})
         failure_stage = summary.get("failure_stage")
         if isinstance(failure_stage, str) and re.fullmatch(r"[a-z_]{1,40}", failure_stage):
             safe["failure_stage"] = failure_stage
-        with open(path, "w", encoding="utf-8") as output:
-            json.dump(safe, output, sort_keys=True)
+        atomic_write_json(Path(path), safe)
+
+
+def safe_diagnostic_text(value: Any) -> str:
+    text = redact_url(str(value))
+    text = re.sub(r"\b\d{8,}:[A-Za-z0-9_-]{20,}\b", "[REDACTED]", text)
+    text = re.sub(r"(?i)(token|secret|authorization|cookie|password|api[_-]?key)(\"?\s*[=:]\s*\"?)[^\s,;\"'}]+",
+                  r"\1\2[REDACTED]", text)
+    return text[:500]
+
+
+def set_run_stage(name: str) -> None:
+    global RUN_STAGE, RUN_STAGE_STARTED_AT
+    if RUN_STAGES and RUN_STAGES[-1]["status"] == "running":
+        finish_run_stage("success")
+    now_utc = datetime.now(timezone.utc).isoformat()
+    now = time.monotonic()
+    RUN_STAGE = name
+    RUN_STAGE_STARTED_AT = now
+    RUN_STAGES.append({"stage": name, "status": "running", "started_at": now_utc})
+
+
+def finish_run_stage(status: str) -> None:
+    if RUN_STAGES and RUN_STAGES[-1]["status"] == "running":
+        now = time.monotonic()
+        RUN_STAGES[-1].update(status=status, finished_at=datetime.now(timezone.utc).isoformat(),
+                              duration_ms=max(0, round((now - RUN_STAGE_STARTED_AT) * 1000)))
+
+
+def write_catalog_evidence(games: list[dict[str, Any]]) -> None:
+    path = os.environ.get("NINTENDO_DEALS_CATALOG_EVIDENCE_PATH", "").strip()
+    if path:
+        atomic_write_json(Path(path), {"schema_version": 1, "source": "Nintendo Europe Solr",
+                           "captured_at": datetime.now(timezone.utc).isoformat(), "records": games}, compressed=True)
+
+
+def write_catalog_page_evidence(start: int, total: int, docs: list[dict[str, Any]]) -> None:
+    directory = os.environ.get("NINTENDO_DEALS_CATALOG_PAGES_DIR", "").strip()
+    if directory:
+        target = Path(directory) / f"page-{start:06d}.json.gz"
+        atomic_write_json(target, {"start": start, "numFound": total, "docs": docs}, compressed=True)
+
+
+def write_private_run_evidence() -> None:
+    path = os.environ.get("NINTENDO_DEALS_PRIVATE_EVIDENCE_PATH", "").strip()
+    if path and RUN_PRIVATE_EVIDENCE:
+        atomic_write_json(Path(path), {"schema_version": 1, "captured_at": datetime.now(timezone.utc).isoformat(),
+                           "run_id": current_run_id(), "inputs_and_decisions": RUN_PRIVATE_EVIDENCE}, compressed=True)
+
+
+def write_run_evidence(status: str, error: Exception | None = None) -> None:
+    path = os.environ.get("NINTENDO_DEALS_EVIDENCE_PATH", "").strip()
+    if not path:
+        return
+    now = datetime.now(timezone.utc)
+    if RUN_STAGES and RUN_STAGES[-1]["status"] == "running":
+        finish_run_stage("failure" if error else "success")
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
+    record = {
+        "schema_version": 1,
+        "status": status,
+        "run_id": run_id,
+        "run_attempt": attempt,
+        "correlation_id": f"gh-{run_id}-a{attempt}" if run_id and attempt else "",
+        "run_url": f"https://github.com/{os.environ.get('GITHUB_REPOSITORY', '')}/actions/runs/{run_id}" if run_id else "",
+        "commit": os.environ.get("GITHUB_SHA", ""),
+        "trigger": os.environ.get("GITHUB_EVENT_NAME", "local"),
+        "started_at": RUN_STARTED_AT_UTC,
+        "finished_at": now.isoformat(),
+        "duration_seconds": max(0, int(time.monotonic() - RUN_STARTED_AT)),
+        "failure_stage": RUN_STAGE if error else "",
+        "failure_type": type(error).__name__ if error else "",
+        "failure_message": safe_diagnostic_text(error) if error else "",
+        "metrics": RUN_METRICS,
+        "stages": RUN_STAGES,
+    }
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(target, record)
+
+
+def current_run_id() -> str:
+    run_id = os.environ.get("GITHUB_RUN_ID", "").strip()
+    attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "").strip()
+    return f"gh-{run_id}-a{attempt}" if run_id and attempt else uuid4().hex
 
 
 def read_http_error_detail(error: urllib.error.HTTPError) -> str:
@@ -161,6 +267,10 @@ def fetch_games() -> list[dict[str, Any]]:
         docs = response.get("docs")
         if type(total) is not int or total < 0 or not isinstance(docs, list):
             raise RuntimeError("Nintendo Solr returned invalid numFound or documents")
+        RUN_METRICS["catalog_pages"] = RUN_METRICS.get("catalog_pages", 0) + 1
+        RUN_METRICS["catalog_documents_received"] = RUN_METRICS.get("catalog_documents_received", 0) + len(docs)
+        RUN_METRICS["catalog_expected_total"] = total
+        write_catalog_page_evidence(start, total, docs)
         if expected_total is not None and total != expected_total:
             raise RuntimeError(f"Nintendo Solr numFound changed during pagination: {expected_total} to {total}")
         expected_total = total
@@ -185,10 +295,13 @@ def fetch_games() -> list[dict[str, Any]]:
             f"Nintendo Solr returned {len(games_by_id)} distinct games; expected {expected_total}"
         )
 
-    return [game for game in games_by_id.values() if is_active_deal(game)]
+    games = [game for game in games_by_id.values() if is_active_deal(game)]
+    RUN_METRICS["catalog_records"] = len(games)
+    return games
 
 
-def fetch_offer_end_dates(games: list[dict[str, Any]], now: datetime | None = None) -> dict[str, dict[str, Any]]:
+def fetch_offer_end_dates(games: list[dict[str, Any]], now: datetime | None = None,
+                          audit: list[dict[str, Any]] | None = None) -> dict[str, dict[str, Any]]:
     """Read Nintendo's official price hook and keep only unambiguous current-price matches."""
     now = now or datetime.now(timezone.utc)
     nsuid_to_games: dict[str, list[dict[str, Any]]] = {}
@@ -206,10 +319,20 @@ def fetch_offer_end_dates(games: list[dict[str, Any]], now: datetime | None = No
     for start in range(0, len(ids), NINTENDO_PRICE_BATCH_SIZE):
         batch = ids[start:start + NINTENDO_PRICE_BATCH_SIZE]
         query = urllib.parse.urlencode({"country": "ES", "lang": "es", "ids": ",".join(batch)})
-        data = request_json(f"{NINTENDO_PRICE_URL}?{query}", timeout=30)
+        try:
+            data = request_json(f"{NINTENDO_PRICE_URL}?{query}", timeout=30)
+        except Exception as error:
+            if audit is not None:
+                audit.append({"batch_start": start, "nsuids": batch, "status": "error",
+                              "error_type": type(error).__name__, "error": safe_diagnostic_text(error)})
+            raise
         prices = data.get("prices") if isinstance(data, dict) else None
         if not isinstance(prices, list):
+            if audit is not None:
+                audit.append({"batch_start": start, "nsuids": batch, "status": "invalid_response"})
             raise RuntimeError("Nintendo official price response did not contain prices")
+        if audit is not None:
+            audit.append({"batch_start": start, "nsuids": batch, "status": "received", "prices": prices})
         for price in prices:
             if not isinstance(price, dict):
                 continue
@@ -281,7 +404,7 @@ def fetch_game_by_id(fs_id: str) -> dict[str, Any] | None:
 
 
 def fetch_watched_games(
-    games: list[dict[str, Any]], preferences: dict[str, Any]
+    games: list[dict[str, Any]], preferences: dict[str, Any], audit: list[dict[str, Any]] | None = None
 ) -> list[dict[str, Any]]:
     games_by_id = {str(game.get("fs_id")): game for game in games if game.get("fs_id") is not None}
     watch_games = preferences.get("watchGames")
@@ -291,10 +414,23 @@ def fetch_watched_games(
     for raw_id in watch_games:
         fs_id = str(raw_id).strip()
         if not fs_id.isdigit():
+            if audit is not None:
+                audit.append({"fs_id": fs_id, "status": "invalid_id"})
             continue
-        game = fetch_game_by_id(fs_id)
+        try:
+            game = fetch_game_by_id(fs_id)
+        except Exception as error:
+            if audit is not None:
+                audit.append({"fs_id": fs_id, "status": "error", "error_type": type(error).__name__,
+                              "error": safe_diagnostic_text(error)})
+            continue
         if game and str(game.get("fs_id")) == fs_id:
+            status = "refreshed" if fs_id in games_by_id else "found"
             games_by_id[fs_id] = game
+        else:
+            status = "not_found"
+        if audit is not None:
+            audit.append({"fs_id": fs_id, "status": status})
     return list(games_by_id.values())
 
 
@@ -425,6 +561,7 @@ def enrich_ratings(
     client_secret: str,
     limit: int = 100,
     today: date | None = None,
+    audit: list[dict[str, Any]] | None = None,
 ) -> dict[str, dict[str, Any]]:
     today = today or datetime.now(timezone.utc).date()
     refresh_after = two_months_before(today)
@@ -448,19 +585,59 @@ def enrich_ratings(
         fs_id = str(game["fs_id"])
         title = str(game.get("title_master_s") or game.get("title") or "").strip()
         if not title:
+            if audit is not None:
+                audit.append({"fs_id": fs_id, "status": "missing_title"})
             continue
         if index:
             time.sleep(IGDB_REQUEST_INTERVAL)
-        candidates = compatible_igdb_candidates(title, fetch_igdb_candidates(title, client_id, token))
+        record: dict[str, Any] = {"fs_id": fs_id, "title": title}
+        try:
+            source_candidates = fetch_igdb_candidates(title, client_id, token)
+        except Exception as error:
+            record.update(status="provider_error", error_type=type(error).__name__,
+                          error=safe_diagnostic_text(error))
+            if audit is not None:
+                audit.append(record)
+            if re.search(r"HTTP (401|403|429)\b", str(error)):
+                if audit is not None:
+                    for pending in candidates_left[index + 1:]:
+                        audit.append({"fs_id": str(pending.get("fs_id", "")), "status": "not_attempted",
+                                      "reason": "provider_auth_or_rate_limit"})
+                break
+            continue
+
+        candidates = compatible_igdb_candidates(title, source_candidates)
         scored = sorted(
             ((candidate, title_similarity(title, candidate.get("name", ""))) for candidate in candidates),
             key=lambda item: item[1],
             reverse=True,
         )
-        if not scored or (len(scored) > 1 and scored[0][1] == scored[1][1]):
+        record.update(candidates=source_candidates, compatible_candidate_ids=[
+            str(candidate.get("id", "")) for candidate in candidates
+        ], ranked_candidates=[{"id": str(candidate.get("id", "")),
+                               "name": str(candidate.get("name", "")),
+                               "confidence": round(confidence, 4)} for candidate, confidence in scored])
+        if not scored:
+            record["status"] = "no_compatible_switch_match"
+            if audit is not None:
+                audit.append(record)
+            continue
+        if len(scored) > 1 and scored[0][1] == scored[1][1]:
+            record["status"] = "ambiguous_top_candidates"
+            if audit is not None:
+                audit.append(record)
             continue
         match, confidence = scored[0]
-        if confidence < 0.88 or not str(match.get("id", "")).isdigit():
+        if confidence < 0.88:
+            record.update(status="below_confidence_threshold", selected_candidate_id=str(match.get("id", "")),
+                          confidence=round(confidence, 4))
+            if audit is not None:
+                audit.append(record)
+            continue
+        if not str(match.get("id", "")).isdigit():
+            record.update(status="invalid_candidate_id", selected_candidate_id=str(match.get("id", "")))
+            if audit is not None:
+                audit.append(record)
             continue
         updates[fs_id] = {
             "igdb_id": int(match["id"]),
@@ -474,6 +651,9 @@ def enrich_ratings(
             "last_updated": datetime.now(timezone.utc).isoformat(),
             "release_date": parse_release_date(game).isoformat() if parse_release_date(game) else None,
         }
+        record.update(status="matched", selected_candidate_id=str(match["id"]), confidence=round(confidence, 4))
+        if audit is not None:
+            audit.append(record)
     return updates
 
 
@@ -607,7 +787,7 @@ def send_price_alerts(
         entry = {**(curated or {}).get(fs_id, {}), "review": f"Price alert: now below your {threshold} EUR threshold."}
         try:
             response = send_game_message(bot_token, chat_id, game, entry, preferences or {}, base_url, "Price alert",
-                {"base_url": base_url, "api_key": api_key, "correlation_id": f"{run_id}:{event_id}"})
+                {"base_url": base_url, "api_key": api_key, "correlation_id": run_id})
             complete_offer_delivery(base_url, api_key, event_id, "sent", {"message_id": telegram_message_id(response)})
         except Exception:
             complete_offer_delivery(base_url, api_key, event_id, "unknown", {})
@@ -655,7 +835,7 @@ def send_offer_events(
         try:
             response = send_game_message(bot_token, chat_id, game, curated.get(fs_id, {}), preferences, base_url,
                 headings[event["kind"]], {"base_url": base_url, "api_key": api_key,
-                                          "correlation_id": f"{run_id}:{event_id}"})
+                                          "correlation_id": run_id})
             complete_offer_delivery(base_url, api_key, event_id, "sent", {"message_id": telegram_message_id(response)})
         except Exception:
             complete_offer_delivery(base_url, api_key, event_id, "unknown", {})
@@ -676,13 +856,33 @@ def compare_deal_arrivals(base_url: str, api_key: str, games: list[dict[str, Any
     # Send only fields used by the shared homepage filter, not descriptions/media.
     catalog = []
     for game in games:
-        systems = game.get("system_type") or []
+        price = game.get("price_discounted_f")
+        if isinstance(price, bool) or not isinstance(price, (int, float, str)):
+            raise RuntimeError("Invalid Nintendo catalog field: price_discounted_f")
+        try:
+            price = float(price)
+        except (ValueError, OverflowError) as error:
+            raise RuntimeError("Invalid Nintendo catalog field: price_discounted_f") from error
+        if not math.isfinite(price):
+            raise RuntimeError("Invalid Nintendo catalog field: price_discounted_f")
+        discount = game.get("price_has_discount_b")
+        if type(discount) is not bool:
+            raise RuntimeError("Invalid Nintendo catalog field: price_has_discount_b")
+
+        fields = {}
+        for field in ("pretty_game_categories_txt", "game_categories_txt", "system_type"):
+            value = game.get(field)
+            if value is None:
+                fields[field] = []
+            elif isinstance(value, str):
+                fields[field] = [value]
+            elif isinstance(value, list) and all(isinstance(item, str) for item in value):
+                fields[field] = value
+            else:
+                raise RuntimeError(f"Invalid Nintendo catalog field: {field}")
         catalog.append({"fs_id": str(game["fs_id"]), "title": str(game.get("title") or ""),
-            "publisher": str(game.get("publisher") or ""), "price_discounted_f": game.get("price_discounted_f"),
-            "price_has_discount_b": game.get("price_has_discount_b"),
-            "pretty_game_categories_txt": game.get("pretty_game_categories_txt") or [],
-            "game_categories_txt": game.get("game_categories_txt") or [],
-            "system_type": systems if isinstance(systems, list) else [systems]})
+            "publisher": str(game.get("publisher") or ""), "price_discounted_f": price,
+            "price_has_discount_b": discount, **fields})
     result = request_json(f"{base_url.rstrip('/')}/api/telegram/deals", method="POST",
                           payload={"games": catalog, "total": len(catalog)}, headers={"x-api-key": api_key}, timeout=45)
     if not isinstance(result, dict) or type(result.get("initialized")) is not bool \
@@ -719,16 +919,23 @@ def publish_offer_end_dates(base_url: str, api_key: str, checked_at: str,
 
 
 def run() -> dict[str, int]:
-    global RUN_STAGE, RUN_STARTED_AT
+    global RUN_STAGE, RUN_STARTED_AT, RUN_STARTED_AT_UTC, RUN_STAGES, RUN_METRICS, RUN_PRIVATE_EVIDENCE
     RUN_STARTED_AT = time.monotonic()
+    RUN_STARTED_AT_UTC = datetime.now(timezone.utc).isoformat()
+    RUN_STAGES = []
+    RUN_METRICS = {}
+    RUN_PRIVATE_EVIDENCE = {}
     base_url = os.environ.get("NINTENDO_DEALS_BASE_URL", "").strip() or "https://nintendo-deals.vercel.app"
     dry_run = os.environ.get("DRY_RUN", "0").lower() in {"1", "true", "yes"}
-    RUN_STAGE = "nintendo_catalog"
+    set_run_stage("nintendo_catalog")
     games = fetch_games()
     catalog_records = len(games)
+    write_catalog_evidence(games)
+    RUN_METRICS["catalog_records"] = catalog_records
+    RUN_METRICS["games"] = len(games)
     catalog_games = games
 
-    RUN_STAGE = "app_snapshots"
+    set_run_stage("app_snapshots")
     preferences = fetch_app_json(base_url, "/api/preferences")
     curated_sources = fetch_app_json(base_url, "/api/curated")
     ratings = fetch_app_json(base_url, "/api/ratings")
@@ -739,16 +946,38 @@ def run() -> dict[str, int]:
     ntdeals = curated_sources.get("ntdeals")
     if not isinstance(curated, dict) or not isinstance(ntdeals, dict):
         raise RuntimeError("Curated API must return separate Nintendo Life and NT Deals maps")
+    RUN_PRIVATE_EVIDENCE["app_snapshots"] = {
+        "preferences": preferences,
+        "curated_sources": curated_sources,
+        "ratings": ratings,
+        "steam": steam,
+    }
+    write_private_run_evidence()
     watched_games = len(preferences.get("watchGames", {}))
-    games = fetch_watched_games(games, preferences)
+    RUN_METRICS.update(watched_games=watched_games, ratings_records=len(ratings),
+                       steam_records=len(steam), nintendolife_entries=len(curated), ntdeals_entries=len(ntdeals))
+    catalog_game_count = len(games)
+    watched_lookups: list[dict[str, Any]] = []
+    games = fetch_watched_games(games, preferences, audit=watched_lookups)
+    RUN_PRIVATE_EVIDENCE["watched_game_lookups"] = watched_lookups
+    lookup_errors = sum(record.get("status") == "error" for record in watched_lookups)
+    if lookup_errors:
+        RUN_METRICS["watched_lookup_errors"] = lookup_errors
+    RUN_METRICS["watched_games_added"] = max(0, len(games) - catalog_game_count)
     offer_checked_at = datetime.now(timezone.utc)
+    offer_end_date_audit: list[dict[str, Any]] = []
     try:
-        offer_end_dates = fetch_offer_end_dates(games, offer_checked_at)
+        offer_end_dates = fetch_offer_end_dates(games, offer_checked_at, audit=offer_end_date_audit)
         offer_end_date_refresh_failed = 0
     except Exception as error:
-        print(f"Nintendo offer end-date refresh unavailable: {type(error).__name__}", file=sys.stderr)
+        RUN_PRIVATE_EVIDENCE["offer_end_date_failure"] = {
+            "error_type": type(error).__name__, "error": safe_diagnostic_text(error),
+        }
+        print(f"Nintendo offer end-date refresh unavailable: {safe_diagnostic_text(error)}", file=sys.stderr)
         offer_end_dates = {}
         offer_end_date_refresh_failed = 1
+    RUN_PRIVATE_EVIDENCE["offer_end_date_batches"] = offer_end_date_audit
+    RUN_PRIVATE_EVIDENCE["offer_end_dates"] = offer_end_dates
     for game in games:
         fs_id = str(game["fs_id"])
         steam_entry = steam.get(fs_id)
@@ -761,18 +990,45 @@ def run() -> dict[str, int]:
         if isinstance(end_entry, dict) and end_entry.get("price_cents") == round(float(game.get("price_discounted_f") or 0) * 100):
             game["offer_end_date"] = end_entry.get("end_datetime")
 
-    RUN_STAGE = "igdb_enrichment"
-    client_id = require_env("TWITCH_CLIENT_ID")
-    client_secret = require_env("TWITCH_CLIENT_SECRET")
-    updates = enrich_ratings(games, ratings, client_id, client_secret)
+    set_run_stage("igdb_enrichment")
+    igdb_searches: list[dict[str, Any]] = []
+    try:
+        client_id = require_env("TWITCH_CLIENT_ID")
+        client_secret = require_env("TWITCH_CLIENT_SECRET")
+        updates = enrich_ratings(games, ratings, client_id, client_secret, audit=igdb_searches)
+        igdb_errors = sum(record.get("status") == "provider_error" for record in igdb_searches)
+        if igdb_errors:
+            RUN_METRICS["igdb_game_errors"] = igdb_errors
+            finish_run_stage("partial")
+    except Exception as error:
+        updates = {}
+        RUN_METRICS["igdb_enrichment_failures"] = 1
+        RUN_PRIVATE_EVIDENCE["igdb_enrichment_failure"] = {
+            "error_type": type(error).__name__, "error": safe_diagnostic_text(error),
+        }
+        finish_run_stage("failure")
+        print(f"IGDB enrichment unavailable; continuing with cached ratings: {safe_diagnostic_text(error)}",
+              file=sys.stderr)
+    RUN_METRICS["rating_updates"] = len(updates)
+    RUN_PRIVATE_EVIDENCE["igdb_searches"] = igdb_searches
     merged_ratings = {**ratings, **updates}
     for game in games:
         rating = merged_ratings.get(str(game["fs_id"]))
         if isinstance(rating, dict):
             game["igdb_rating"] = rating
+    RUN_PRIVATE_EVIDENCE["notification_games"] = games
+    RUN_PRIVATE_EVIDENCE["rating_updates"] = updates
 
     alerts = find_price_alerts(games, preferences)
     digest_games = select_digest_games(games, curated, preferences)
+    RUN_PRIVATE_EVIDENCE["selected_ids"] = {
+        "price_alerts": [str(game["fs_id"]) for game, _ in alerts],
+        "curated_digest": [str(game["fs_id"]) for game in digest_games],
+    }
+    write_private_run_evidence()
+    RUN_METRICS.update(price_alerts=len(alerts), digest_items=len(digest_games),
+                       offer_end_dates=len(offer_end_dates),
+                       offer_end_date_refresh_failed=offer_end_date_refresh_failed)
     summary = {
         "catalog_records": catalog_records,
         "games": len(games),
@@ -788,8 +1044,8 @@ def run() -> dict[str, int]:
     }
 
     ratings_api_key = require_env("RATINGS_API_KEY")
-    run_id = uuid4().hex
-    RUN_STAGE = "ratings_publish"
+    run_id = current_run_id()
+    set_run_stage("ratings_publish")
     if updates and not dry_run:
         request_json(
             f"{base_url.rstrip('/')}/api/ratings",
@@ -799,16 +1055,19 @@ def run() -> dict[str, int]:
             timeout=45,
         )
     if offer_end_date_refresh_failed == 0 and not dry_run:
-        RUN_STAGE = "offer_end_date_publish"
+        set_run_stage("offer_end_date_publish")
         try:
             publish_offer_end_dates(base_url, ratings_api_key,
                 offer_checked_at.isoformat().replace("+00:00", "Z"), offer_end_dates)
         except Exception as error:
             print(f"Nintendo offer end-date publication unavailable: {type(error).__name__}", file=sys.stderr)
             summary["offer_end_date_refresh_failed"] = 1
-    RUN_STAGE = "deal_arrival_comparison"
+            RUN_METRICS["offer_end_date_refresh_failed"] = 1
+    set_run_stage("deal_arrival_comparison")
     # Direct watched-ID lookups are a notification backstop even when the full query omitted that game.
     arrivals = compare_deal_arrivals(base_url, ratings_api_key, games)
+    RUN_PRIVATE_EVIDENCE["deal_comparison"] = arrivals
+    write_private_run_evidence()
     event_kinds = [event["kind"] for event in arrivals["events"]]
     event_ids = {event["fs_id"] for event in arrivals["events"]}
     curated_event_ids = {str(game["fs_id"]) for game in digest_games if str(game["fs_id"]) in event_ids}
@@ -819,28 +1078,45 @@ def run() -> dict[str, int]:
                     "offer_events": len(arrivals["events"]),
                     "digest_items": len(curated_event_ids),
                     "deals_baseline_initialized": int(arrivals["baseline"])})
+    RUN_METRICS.update({key: summary[key] for key in (
+        "eligible_deals", "new_deals", "price_changed_deals", "reentered_deals", "offer_events",
+        "digest_items", "deals_baseline_initialized",
+    )})
     if dry_run:
         summary["duration_seconds"] = int(time.monotonic() - RUN_STARTED_AT)
-        write_redacted_summary(summary)
+        RUN_METRICS["duration_seconds"] = summary["duration_seconds"]
+        set_run_stage("complete")
+        write_redacted_summary({"status": "dry_run", "run_id": run_id,
+                                "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", ""), **RUN_METRICS})
+        write_run_evidence("dry_run")
         print(json.dumps({"dry_run": True, **summary}, sort_keys=True))
         return summary
     bot_token = require_env("TELEGRAM_BOT_TOKEN")
     chat_id = require_env("TELEGRAM_CHAT_ID")
-    RUN_STAGE = "new_deal_delivery"
+    set_run_stage("new_deal_delivery")
     summary.update(send_offer_events(bot_token, chat_id, catalog_games, arrivals["events"],
         arrivals["eligibleIds"], curated, preferences, base_url, ratings_api_key, run_id))
-    RUN_STAGE = "price_alert_delivery"
+    RUN_METRICS.update({key: summary[key] for key in (
+        "new_deals_sent", "price_changed_deals_sent", "reentered_deals_sent", "digest_messages_sent",
+        "offer_messages_sent",
+    )})
+    set_run_stage("price_alert_delivery")
     summary["price_alerts_sent"] = send_price_alerts(
         bot_token, chat_id, alerts, base_url, ratings_api_key, arrivals["offers"], run_id, curated, preferences
     )
-    RUN_STAGE = "deal_snapshot_commit"
+    RUN_METRICS["price_alerts_sent"] = summary["price_alerts_sent"]
+    set_run_stage("deal_snapshot_commit")
     request_json(f"{base_url.rstrip('/')}/api/telegram/deals", method="PUT",
                  payload={"eligibleIds": arrivals["eligibleIds"], "offers": arrivals["offers"],
                           "etag": arrivals["etag"], "date": datetime.now(ZoneInfo("Europe/Madrid")).date().isoformat()},
                  headers={"x-api-key": ratings_api_key})
     summary["duration_seconds"] = int(time.monotonic() - RUN_STARTED_AT)
-    RUN_STAGE = "complete"
-    write_redacted_summary(summary)
+    RUN_METRICS["duration_seconds"] = summary["duration_seconds"]
+    set_run_stage("complete")
+    write_redacted_summary({"status": "success", "run_id": run_id,
+                            "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", ""), **RUN_METRICS})
+    write_private_run_evidence()
+    write_run_evidence("success")
     print(json.dumps(summary, sort_keys=True))
     return summary
 
@@ -849,12 +1125,26 @@ if __name__ == "__main__":
     try:
         run()
     except Exception as error:
+        RUN_METRICS["duration_seconds"] = int(time.monotonic() - RUN_STARTED_AT)
         try:
             write_redacted_summary({
+                "status": "failure",
+                "run_id": current_run_id(),
+                "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", ""),
+                "failure_type": type(error).__name__,
+                "failure_message": safe_diagnostic_text(error),
+                **RUN_METRICS,
                 "failure_stage": RUN_STAGE,
-                "duration_seconds": int(time.monotonic() - RUN_STARTED_AT),
             })
         except Exception:
-            print("Could not write the redacted failure summary", file=sys.stderr)
-        print(f"Nintendo Deals daily worker failed: {error}", file=sys.stderr)
+            print("Could not write daily run summary", file=sys.stderr)
+        try:
+            write_private_run_evidence()
+        except Exception:
+            print("Could not write private run evidence", file=sys.stderr)
+        try:
+            write_run_evidence("failure", error)
+        except Exception:
+            print("Could not write redacted run evidence", file=sys.stderr)
+        print(f"Nintendo Deals daily worker failed: {safe_diagnostic_text(error)}", file=sys.stderr)
         sys.exit(1)

@@ -1,6 +1,11 @@
 import unittest
 import urllib.error
+import gzip
+import json
+import os
 from io import BytesIO
+from pathlib import Path
+import tempfile
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
@@ -21,6 +26,78 @@ def solr_response(total, docs):
 
 
 class CatalogFetchTests(unittest.TestCase):
+    def test_compare_deal_arrivals_normalizes_nintendo_field_shapes(self):
+        response = {"initialized": True, "baseline": False, "offers": {}, "events": [],
+                    "etag": "snapshot", "eligibleIds": ["123"], "newIds": []}
+        raw_game = {
+            "fs_id": 123,
+            "title": "Shape Test",
+            "price_discounted_f": "4.99",
+            "price_has_discount_b": True,
+            "pretty_game_categories_txt": "Adventure",
+            "system_type": "nintendoswitch",
+        }
+        with patch.object(run_daily, "request_json", return_value=response) as request:
+            run_daily.compare_deal_arrivals("https://nintendo-deals.test", "key", [raw_game])
+
+        payload = request.call_args.kwargs["payload"]
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["games"][0], {
+            "fs_id": "123", "title": "Shape Test", "publisher": "",
+            "price_discounted_f": 4.99, "price_has_discount_b": True,
+            "pretty_game_categories_txt": ["Adventure"], "game_categories_txt": [],
+            "system_type": ["nintendoswitch"],
+        })
+
+    def test_compare_deal_arrivals_rejects_ambiguous_discount_flag(self):
+        raw_game = game("123")
+        raw_game["price_has_discount_b"] = "false"
+        with patch.object(run_daily, "request_json") as request:
+            with self.assertRaisesRegex(RuntimeError, "price_has_discount_b"):
+                run_daily.compare_deal_arrivals("https://nintendo-deals.test", "key", [raw_game])
+        request.assert_not_called()
+
+    def test_igdb_search_failure_for_one_game_does_not_stop_later_games(self):
+        games = [
+            {"fs_id": "1", "title": "First Game"},
+            {"fs_id": "2", "title": "Second Game"},
+        ]
+        candidate = {"id": 42, "name": "Second Game", "platforms": [{"name": "Nintendo Switch"}],
+                     "rating": 80, "rating_count": 20}
+        audit = []
+        with patch.object(run_daily, "fetch_igdb_token", return_value="token"), \
+             patch.object(run_daily, "fetch_igdb_candidates",
+                          side_effect=[RuntimeError("temporary provider failure"), [candidate]]), \
+             patch.object(run_daily.time, "sleep"):
+            updates = run_daily.enrich_ratings(games, {}, "client", "secret", audit=audit)
+
+        self.assertEqual(set(updates), {"2"})
+        self.assertEqual([record["status"] for record in audit], ["provider_error", "matched"])
+        self.assertEqual(audit[0]["error"], "temporary provider failure")
+        self.assertEqual(audit[1]["candidates"][0]["id"], 42)
+
+    def test_worker_continues_deal_selection_when_igdb_auth_is_unavailable(self):
+        game_record = {"fs_id": "1", "title": "Visible Game", "price_discounted_f": 4.99,
+                       "price_has_discount_b": True, "system_type": ["nintendoswitch"]}
+        snapshots = [{"watchGames": {}}, {"nintendolife": {}, "ntdeals": {}}, {}, {}]
+        comparison = {"initialized": True, "baseline": False, "offers": {}, "events": [], "etag": None,
+                      "eligibleIds": [], "newIds": []}
+        with patch.dict(os.environ, {"DRY_RUN": "1", "RATINGS_API_KEY": "test-key",
+                                     "TWITCH_CLIENT_ID": "", "TWITCH_CLIENT_SECRET": ""}), \
+             patch.object(run_daily, "fetch_games", return_value=[game_record]), \
+             patch.object(run_daily, "fetch_app_json", side_effect=snapshots), \
+             patch.object(run_daily, "fetch_watched_games", return_value=[game_record]), \
+             patch.object(run_daily, "fetch_offer_end_dates", return_value={}), \
+             patch.object(run_daily, "find_price_alerts", return_value=[]), \
+             patch.object(run_daily, "select_digest_games", return_value=[]), \
+             patch.object(run_daily, "compare_deal_arrivals", return_value=comparison):
+            result = run_daily.run()
+
+        self.assertEqual(result["catalog_records"], 1)
+        self.assertEqual(run_daily.RUN_METRICS["igdb_enrichment_failures"], 1)
+        self.assertEqual(next(stage for stage in run_daily.RUN_STAGES if stage["stage"] == "igdb_enrichment")["status"],
+                         "failure")
+
     def test_fetch_games_paginates_to_all_distinct_results(self):
         docs = [game(str(index)) for index in range(1001)]
         with patch.object(
@@ -42,6 +119,23 @@ class CatalogFetchTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "numFound changed"):
                 run_daily.fetch_games()
+
+    def test_fetch_games_keeps_completed_page_evidence_when_later_page_fails(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ, {"NINTENDO_DEALS_CATALOG_PAGES_DIR": directory}
+        ), patch.object(
+            run_daily, "request_json",
+            side_effect=[solr_response(2, [game("1")]), solr_response(3, [game("2")])],
+        ):
+            with self.assertRaisesRegex(RuntimeError, "numFound changed"):
+                run_daily.fetch_games()
+
+            first = Path(directory) / "page-000000.json.gz"
+            second = Path(directory) / "page-000001.json.gz"
+            self.assertTrue(first.exists())
+            self.assertTrue(second.exists())
+            with gzip.open(first, "rt", encoding="utf-8") as source:
+                self.assertEqual(json.load(source)["docs"][0]["fs_id"], "1")
 
     def test_fetch_games_rejects_duplicate_ids_that_hide_missing_records(self):
         with patch.object(run_daily, "request_json", return_value=solr_response(2, [game("1"), game("1")])):
@@ -84,6 +178,16 @@ class CatalogFetchTests(unittest.TestCase):
         lookup.assert_any_call("1")
         lookup.assert_any_call("2")
         self.assertEqual({item["fs_id"]: item["price_discounted_f"] for item in result}, {"1": 1.99})
+
+    def test_one_watched_lookup_error_does_not_stop_other_games(self):
+        audit = []
+        with patch.object(run_daily, "fetch_game_by_id", side_effect=[RuntimeError("temporary Nintendo error"),
+                game("2", 1.99)]):
+            result = run_daily.fetch_watched_games([], {"watchGames": {"1": {}, "2": {}}}, audit=audit)
+
+        self.assertEqual([item["fs_id"] for item in result], ["2"])
+        self.assertEqual([item["status"] for item in audit], ["error", "found"])
+        self.assertEqual(audit[0]["error"], "temporary Nintendo error")
 
     def test_direct_lookup_explicitly_excludes_switch_2(self):
         with patch.object(run_daily, "request_json", return_value=solr_response(0, [])) as request:
@@ -140,8 +244,23 @@ class CatalogFetchTests(unittest.TestCase):
         self.assertEqual(first["digest_messages_sent"], 1)
         self.assertEqual(replay["offer_messages_sent"], 0)
         self.assertEqual(send.call_count, 1)
+        self.assertEqual(send.call_args.args[-1]["correlation_id"], "run-1")
         complete.assert_called_once_with("https://nintendo-deals.test", "api-key",
                                          "offer:123:1:0:499", "sent", {"message_id": 7})
+
+    def test_price_alert_audit_uses_run_correlation_id(self):
+        game_record = {"fs_id": "123", "title": "Test Game", "price_discounted_f": 1.99}
+        watch = {"threshold": 2}
+        offer_state = {"123": {"active": True, "episode": 1, "price_change_sequence": 0,
+                                "price_cents": 199}}
+        with patch.object(run_daily, "claim_offer_delivery", return_value=True), \
+             patch.object(run_daily, "complete_offer_delivery"), \
+             patch.object(run_daily, "send_game_message", return_value={"result": {"message_id": 7}}) as send:
+            sent = run_daily.send_price_alerts("token", "chat", [(game_record, watch)],
+                "https://nintendo-deals.test", "api-key", offer_state, "gh-123-a1")
+
+        self.assertEqual(sent, 1)
+        self.assertEqual(send.call_args.args[-1]["correlation_id"], "gh-123-a1")
 
     def test_telegram_request_errors_redact_bot_token_from_destination(self):
         error = urllib.error.HTTPError(

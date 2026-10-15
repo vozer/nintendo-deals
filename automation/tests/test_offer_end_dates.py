@@ -21,8 +21,9 @@ class OfferEndDateTests(unittest.TestCase):
             {"title_id": 3002, "discount_price": {"raw_value": "3.99"}},
         ]}
         now = datetime(2026, 10, 4, tzinfo=timezone.utc)
+        audit = []
         with patch("automation.run_daily.request_json", return_value=price_data) as request:
-            result = fetch_offer_end_dates(games, now)
+            result = fetch_offer_end_dates(games, now, audit=audit)
 
         self.assertEqual(request.call_count, 1)
         self.assertIn("country=ES", request.call_args.args[0])
@@ -30,6 +31,7 @@ class OfferEndDateTests(unittest.TestCase):
         self.assertEqual(result, {"1": {
             "price_cents": 499, "end_datetime": "2026-10-14T21:59:59Z", "checked_at": "2026-10-04T00:00:00Z",
         }})
+        self.assertEqual(audit[0]["prices"], price_data["prices"])
 
     def test_batches_ids_by_fifty_and_never_infers_missing_or_expired_hook_values(self):
         games = [{"fs_id": str(index), "nsuid_txt": [str(10_000 + index)], "price_discounted_f": 1.00}

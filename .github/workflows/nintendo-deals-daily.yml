@@ -25,6 +25,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Prepare run evidence directory
+        run: mkdir -p run-evidence/catalog-pages
+
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.14.7'
@@ -46,7 +49,9 @@ jobs:
           NINTENDO_DEALS_BASE_URL: ${{ vars.NINTENDO_DEALS_BASE_URL }}
           RATINGS_API_KEY: ${{ secrets.RATINGS_API_KEY }}
           DRY_RUN: ${{ steps.mode.outputs.dry_run }}
-          NINTENDO_DEALS_CURATION_SUMMARY_PATH: curated-run-summary.json
+          NINTENDO_DEALS_CURATION_SUMMARY_PATH: run-evidence/curated-run-summary.json
+          NINTENDO_DEALS_CURATION_EVIDENCE_PATH: run-evidence/curation-evidence.json
+          NINTENDO_DEALS_CURATION_SOURCE_PATH: run-evidence/nintendolife-source.html.gz
         shell: bash
         run: |
           if [[ "$DRY_RUN" == "1" ]]; then
@@ -58,7 +63,7 @@ jobs:
 
       - name: Run daily worker
         id: worker
-        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+        if: ${{ always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
         env:
           NINTENDO_DEALS_BASE_URL: ${{ vars.NINTENDO_DEALS_BASE_URL }}
           RATINGS_API_KEY: ${{ secrets.RATINGS_API_KEY }}
@@ -67,68 +72,45 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DRY_RUN: ${{ steps.mode.outputs.dry_run }}
-          NINTENDO_DEALS_SUMMARY_PATH: daily-run-summary.json
+          NINTENDO_DEALS_SUMMARY_PATH: run-evidence/daily-run-summary.json
+          NINTENDO_DEALS_EVIDENCE_PATH: run-evidence/daily-run-evidence.json
+          NINTENDO_DEALS_CATALOG_EVIDENCE_PATH: run-evidence/active-catalog.json.gz
+          NINTENDO_DEALS_CATALOG_PAGES_DIR: run-evidence/catalog-pages
+          NINTENDO_DEALS_PRIVATE_EVIDENCE_PATH: run-evidence/private-run-inputs.json.gz
         run: python -m automation.run_daily
 
-      - name: Create redacted run summary
+      - name: Finalize run evidence
         if: always()
         env:
           CURATION_OUTCOME: ${{ steps.curation.outcome }}
           WORKER_OUTCOME: ${{ steps.worker.outcome }}
+          NINTENDO_DEALS_EVIDENCE_DIR: run-evidence
           RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
           COMMIT_SHA: ${{ github.sha }}
-        run: |
-          python - <<'PY'
-          import json, os
-          from datetime import datetime, timezone
-          from pathlib import Path
+          REF: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_STARTED_AT: ${{ github.run_started_at }}
+          DRY_RUN: ${{ steps.mode.outputs.dry_run }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          API_BASE_URL: ${{ vars.NINTENDO_DEALS_BASE_URL }}
+          RATINGS_API_KEY: ${{ secrets.RATINGS_API_KEY }}
+        run: python scripts/finalize-daily-run.py
 
-          allowed = {
-              "catalog_records", "watched_games", "ratings_records",
-              "nintendolife_entries", "ntdeals_entries", "nintendolife_duration_seconds", "nintendolife_source_entries",
-              "nintendolife_matches", "nintendolife_rejections", "rating_updates",
-              "duration_seconds", "failure_stage", "games", "price_alerts", "digest_items",
-              "price_alerts_sent", "digest_messages_sent", "new_deals", "new_deals_sent",
-              "price_changed_deals", "price_changed_deals_sent", "reentered_deals", "reentered_deals_sent",
-              "offer_events", "offer_messages_sent", "offer_end_dates", "offer_end_date_refresh_failed",
-              "eligible_deals", "deals_baseline_initialized",
-          }
-          metrics = {}
-          for filename in ("curated-run-summary.json", "daily-run-summary.json"):
-              source = Path(filename)
-              if source.exists():
-                  values = json.loads(source.read_text())
-                  if not isinstance(values, dict):
-                      raise ValueError(f"{filename} is not a JSON object")
-                  metrics.update({key: value for key, value in values.items() if key in allowed})
-          outcomes = [os.environ.get("CURATION_OUTCOME", ""), os.environ.get("WORKER_OUTCOME", "")]
-          status = "failure" if "failure" in outcomes else "cancelled" if "cancelled" in outcomes else (
-              "skipped" if all(value == "skipped" for value in outcomes) else "success"
-          )
-          failure_stage = metrics.pop("failure_stage", None)
-          if status == "failure" and not failure_stage:
-              failure_stage = "nintendolife_refresh" if outcomes[0] == "failure" else "daily_worker"
-          summary = {
-              "status": status,
-              "run_id": os.environ["RUN_ID"],
-              "commit": os.environ["COMMIT_SHA"],
-              "finished_at": datetime.now(timezone.utc).isoformat(),
-              "metrics": {key: value for key, value in metrics.items() if key in allowed and key != "failure_stage" and type(value) is int},
-          }
-          if failure_stage:
-              summary["failure_stage"] = failure_stage
-          Path("redacted-summary.json").write_text(json.dumps(summary, sort_keys=True) + "\n")
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as output:
-              output.write(f"## Nintendo Deals run: {summary['status']}\n\n")
-              output.write(f"Run `{summary['run_id']}` at `{summary['finished_at']}`.\n\n")
-              output.write("Counts: " + json.dumps(summary["metrics"], sort_keys=True) + "\n")
-          PY
-
-      - name: Upload redacted run summary
+      - name: Upload detailed redacted run evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: nintendo-deals-run-summary-${{ github.run_id }}
-          path: redacted-summary.json
+          name: nintendo-deals-run-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: |
+            run-evidence/active-catalog.json.gz
+            run-evidence/catalog-pages/page-*.json.gz
+            run-evidence/curated-run-summary.json
+            run-evidence/curation-evidence.json
+            run-evidence/daily-run-evidence.json
+            run-evidence/daily-run-summary.json
+            run-evidence/nintendolife-source.html.gz
+            run-evidence/redacted-summary.json
+            run-evidence/workflow-run.json
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90

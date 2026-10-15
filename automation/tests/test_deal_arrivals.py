@@ -2,8 +2,10 @@ import io
 import json
 import os
 import unittest
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlsplit
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from automation.run_daily import run
 
@@ -13,6 +15,10 @@ class DailyArrivalTests(unittest.TestCase):
                 confirmed=True, fail_photo=False, watched_backstop=False):
         calls = []
         audits = []
+        offer_end = (datetime.now(ZoneInfo("Europe/Madrid")) + timedelta(days=30)).replace(
+            hour=23, minute=59, second=59, microsecond=0
+        )
+        self.expected_offer_end = offer_end.strftime("%d %b %Y").lstrip("0")
         game = {"fs_id": "123", "nsuid_txt": ["70010000121425"], "title": "Adventure",
                 "price_regular_f": 6.99, "price_discounted_f": 4.99,
                 "price_discount_percentage_f": 29, "price_has_discount_b": True,
@@ -38,7 +44,8 @@ class DailyArrivalTests(unittest.TestCase):
                     response = {"response": {"numFound": 1, "docs": [game]}}
             elif "api.ec.nintendo.com/v1/price" in url:
                 response = {"prices": [{"title_id": 70010000121425, "discount_price": {
-                    "raw_value": "4.99", "end_datetime": "2026-10-14T21:59:59Z"}}]}
+                    "raw_value": "4.99", "end_datetime": offer_end.astimezone(timezone.utc).isoformat().replace(
+                        "+00:00", "Z")}}]}
             elif url.endswith("/api/preferences"):
                 response = {"hiddenGames": [],
                             "watchGames": {"123": {"threshold": 5, "title": "Adventure"}} if watched_backstop else {},
@@ -99,7 +106,7 @@ class DailyArrivalTests(unittest.TestCase):
         self.assertEqual(len(photos), 1)
         photo = photos[0]
         self.assertIn("<b>New deal</b>", photo["caption"])
-        self.assertIn("Offer ends: 14 Oct 2026", photo["caption"])
+        self.assertIn(f"Offer ends: {self.expected_offer_end}", photo["caption"])
         self.assertEqual(photo["reply_markup"]["inline_keyboard"][2], [
             {"text": "Nintendo", "url": "https://www.nintendo.com/es-es/Juegos/Adventure-123.html"},
             {"text": "Steam", "url": "https://store.steampowered.com/app/570/"},
