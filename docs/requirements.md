@@ -22,7 +22,7 @@ This catalog reverse-engineers the current product and records the observable ga
 | FR-014 | Suppress Repeated Offers | As a deal shopper, I want the same game offer sent again only when its discounted price changes or a complete crawl observes the discount absent and a later crawl sees it return. | High | Implemented |
 | FR-015 | Show Nintendo Offer End Date | As a deal shopper, I want the official offer end date on a game tile and Telegram message when Nintendo provides one, and no date when it does not. | Medium | Implemented |
 
-FR-012 is deployed: quiet initialization and preference preservation were verified live; arrival/re-entry delivery and photo-caption callbacks were verified using deterministic local tests. The first naturally occurring production arrival and a shopper-initiated photo callback remain validation follow-ups, not missing implementation. See [release evidence](plans/2026-09-30-telegram-deal-arrivals.md) and [notification backlog](telegram-notification-backlog.md). FR-013 through FR-015 are implemented locally in this change and remain unreleased pending the repository's release gates.
+FR-012/014 are deployed. Production run `38812359994` exposed a legacy eligibility-only snapshot migration gap: 55 newly eligible deals were preserved in the private archive but not sent; fix `8f2150a` is deployed. A one-time recovery of those messages still requires approval of the exact manifest; the next natural transition remains a validation follow-up. FR-013 through FR-015 are also deployed. See [release evidence](plans/2026-09-30-telegram-deal-arrivals.md) and [notification backlog](telegram-notification-backlog.md).
 
 ## Non-Functional Requirements
 
