@@ -90,6 +90,10 @@ export async function POST(req: NextRequest) {
       const previous = offers[id];
       if (baseline || !previous) {
         offers[id] = { active: true, price_cents, episode: 1, price_change_sequence: 0 };
+        if (snapshot.etag !== null && !previousEligible.has(id)) {
+          events.push({ fs_id: id, kind: 'new', previous_price_cents: null,
+            price_cents, episode: 1, price_change_sequence: 0 });
+        }
         continue;
       }
       if (!previous.active) {

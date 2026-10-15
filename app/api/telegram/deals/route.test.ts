@@ -49,6 +49,19 @@ it('baselines then reports only newly qualifying deals without modifying prefere
   expect(blobs.get('preferences.json')!.raw).toBe(before);
 });
 
+it('emits a new event for newly eligible IDs in a legacy snapshot and baselines known prices quietly', async () => {
+  blobs.set('telegram-deals.json', { raw: JSON.stringify({ eligibleIds: ['1', '9'], date: '2026-10-04' }), etag: 'legacy' });
+  const result = await (await POST(request({ games: [game('1'), game('10')], total: 2 }))).json();
+
+  expect(result).toMatchObject({ initialized: true, baseline: true, newIds: ['10'], events: [
+    { fs_id: '10', kind: 'new', previous_price_cents: null, price_cents: 499, episode: 1, price_change_sequence: 0 },
+  ] });
+  expect(result.offers).toEqual({
+    '1': { active: true, price_cents: 499, episode: 1, price_change_sequence: 0 },
+    '10': { active: true, price_cents: 499, episode: 1, price_change_sequence: 0 },
+  });
+});
+
 it('rejects unauthorized calls, incomplete catalogs, stale commits and corrupt state', async () => {
   expect((await POST(request({}, 'POST', ''))).status).toBe(401);
   expect((await PUT(request({}, 'PUT', 'wrong'))).status).toBe(401);
