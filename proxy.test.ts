@@ -30,4 +30,16 @@ describe('authentication redirect', () => {
 
     expect(response.headers.get('location')).toBeNull();
   });
+
+  it('lets API-key-protected automation requests reach route-level authorization', async () => {
+    process.env.ACCESS_PASSWORD = 'test-only-password';
+    const request = new NextRequest('https://nintendo-deals.test/api/automation/runs', {
+      headers: { 'x-api-key': 'test-api-key' },
+    });
+
+    const response = await proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('location')).toBeNull();
+  });
 });
