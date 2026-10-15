@@ -1065,7 +1065,7 @@ def run() -> dict[str, int]:
             RUN_METRICS["offer_end_date_refresh_failed"] = 1
     set_run_stage("deal_arrival_comparison")
     # Direct watched-ID lookups are a notification backstop even when the full query omitted that game.
-    arrivals = compare_deal_arrivals(base_url, ratings_api_key, games)
+    arrivals = compare_deal_arrivals(base_url, ratings_api_key, catalog_games)
     RUN_PRIVATE_EVIDENCE["deal_comparison"] = arrivals
     write_private_run_evidence()
     event_kinds = [event["kind"] for event in arrivals["events"]]

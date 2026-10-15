@@ -98,6 +98,30 @@ class CatalogFetchTests(unittest.TestCase):
         self.assertEqual(next(stage for stage in run_daily.RUN_STAGES if stage["stage"] == "igdb_enrichment")["status"],
                          "failure")
 
+    def test_watched_non_deal_backstop_is_alerted_but_excluded_from_deal_snapshot(self):
+        catalog_game = {"fs_id": "1", "title": "Catalog Deal", "price_discounted_f": 4.99,
+                        "price_has_discount_b": True, "system_type": ["nintendoswitch"]}
+        watched_game = {"fs_id": "2", "title": "No Longer Discounted", "price_discounted_f": None,
+                        "price_has_discount_b": False, "system_type": ["nintendoswitch"]}
+        snapshots = [{"watchGames": {"2": {"threshold": 2, "title": "No Longer Discounted"}}},
+                     {"nintendolife": {}, "ntdeals": {}}, {}, {}]
+        comparison = {"initialized": True, "baseline": False, "offers": {}, "events": [], "etag": None,
+                      "eligibleIds": [], "newIds": []}
+        with patch.dict(os.environ, {"DRY_RUN": "1", "RATINGS_API_KEY": "test-key",
+                                     "TWITCH_CLIENT_ID": "", "TWITCH_CLIENT_SECRET": ""}), \
+             patch.object(run_daily, "fetch_games", return_value=[catalog_game]), \
+             patch.object(run_daily, "fetch_app_json", side_effect=snapshots), \
+             patch.object(run_daily, "fetch_watched_games", return_value=[catalog_game, watched_game]), \
+             patch.object(run_daily, "fetch_offer_end_dates", return_value={}), \
+             patch.object(run_daily, "find_price_alerts", return_value=[(watched_game, 2)]) as find_alerts, \
+             patch.object(run_daily, "select_digest_games", return_value=[]), \
+             patch.object(run_daily, "compare_deal_arrivals", return_value=comparison) as compare:
+            result = run_daily.run()
+
+        self.assertEqual(compare.call_args.args[2], [catalog_game])
+        self.assertEqual(find_alerts.call_args.args[0], [catalog_game, watched_game])
+        self.assertEqual(result["price_alerts"], 1)
+
     def test_fetch_games_paginates_to_all_distinct_results(self):
         docs = [game(str(index)) for index in range(1001)]
         with patch.object(

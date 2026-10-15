@@ -157,7 +157,7 @@ class DailyArrivalTests(unittest.TestCase):
                             for url, _, _ in calls if "searching.nintendo" in url))
         comparison = next(body for url, method, body in calls
                           if url.endswith("/api/telegram/deals") and method == "POST")
-        self.assertEqual(comparison["total"], 1)
+        self.assertEqual(comparison["total"], 0)
         self.assertEqual(summary["price_alerts_sent"], 1)
 
 
