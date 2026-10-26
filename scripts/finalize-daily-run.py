@@ -53,7 +53,7 @@ def read_json(root, name, errors):
         return {}
 
 
-def workflow_status(outcomes, metrics=None):
+def workflow_status(outcomes, metrics=None, steam_refresh_failed=False):
     if "failure" in outcomes:
         return "failure"
     if "cancelled" in outcomes:
@@ -61,7 +61,7 @@ def workflow_status(outcomes, metrics=None):
     status = "skipped" if all(value == "skipped" for value in outcomes) else "success"
     partial_metrics = ("nintendolife_lookup_errors", "watched_lookup_errors", "igdb_enrichment_failures",
                        "igdb_game_errors", "offer_end_date_refresh_failed")
-    if status == "success" and any((metrics or {}).get(key, 0) for key in partial_metrics):
+    if status == "success" and (steam_refresh_failed or any((metrics or {}).get(key, 0) for key in partial_metrics)):
         return "partial"
     return status
 
@@ -105,6 +105,7 @@ def post_private_audit(summary, worker, curation, api_base, api_key):
         "response": {"status": summary["status"], "failure_stage": summary.get("failure_stage"),
                      "failure_type": summary.get("failure_type"),
                      "failure_message": summary.get("failure_message", ""),
+                     "step_outcomes": summary["step_outcomes"],
                      "metrics": summary["metrics"], "stages": worker.get("stages", []),
                      "curation": {key: value for key, value in curation.items()
                                   if key.startswith("nintendolife_")},
@@ -132,14 +133,18 @@ def main():
     curation_detail = read_json(root, "curation-evidence.json", read_errors)
     worker_detail = read_json(root, "daily-run-evidence.json", read_errors)
     outcomes = [os.environ.get("CURATION_OUTCOME", ""), os.environ.get("WORKER_OUTCOME", "")]
-    status = workflow_status(outcomes)
+    steam_refresh_outcome = os.environ.get("STEAM_REFRESH_OUTCOME", "skipped")
     failure_stage = worker.get("failure_stage") or curation_detail.get("failure_stage")
-    if status == "failure" and not failure_stage:
-        failure_stage = "nintendolife_refresh" if outcomes[0] == "failure" else "daily_worker"
     failure_type = worker.get("failure_type") or curation_detail.get("failure_type") or ""
     metrics = {key: value for source in (curation, worker) for key, value in source.items()
                if key in METRIC_NAMES and type(value) is int}
-    status = workflow_status(outcomes, metrics)
+    steam_refresh_failed = steam_refresh_outcome == "failure"
+    status = workflow_status(outcomes, metrics, steam_refresh_failed)
+    if status == "failure" and not failure_stage:
+        failure_stage = "nintendolife_refresh" if outcomes[0] == "failure" else "daily_worker"
+    elif status == "partial" and steam_refresh_failed and not failure_stage:
+        failure_stage = "steam_review_refresh"
+        failure_type = "SteamReviewRefreshStepFailure"
     run_id = os.environ.get("RUN_ID", "")
     attempt = os.environ.get("RUN_ATTEMPT", "")
     run_mode = os.environ.get("DRY_RUN", "")
@@ -156,7 +161,8 @@ def main():
         "run_url": os.environ.get("RUN_URL", ""),
         "started_at": os.environ.get("RUN_STARTED_AT", ""),
         "finished_at": datetime.now(timezone.utc).isoformat(),
-        "step_outcomes": {"curation": outcomes[0], "worker": outcomes[1]},
+        "step_outcomes": {"curation": outcomes[0], "worker": outcomes[1],
+                           "steam_refresh": steam_refresh_outcome},
         "metrics": metrics,
     }
     if failure_stage:
@@ -210,6 +216,7 @@ def main():
             output.write(f"## Nintendo Deals run: {status}\n\n")
             output.write(f"Run `{run_id}` attempt `{attempt}` at `{summary['finished_at']}`.\n")
             output.write(f"Correlation: `{summary['correlation_id']}`.\n\n")
+            output.write(f"Steam review refresh step: `{steam_refresh_outcome}`.\n\n")
             output.write(f"Failure stage: `{failure_stage or 'none'}`; type: `{failure_type or 'none'}`.\n\n")
             if summary.get("failure_message"):
                 output.write(f"Safe failure detail: `{summary['failure_message']}`.\n\n")

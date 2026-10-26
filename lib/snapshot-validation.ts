@@ -80,6 +80,7 @@ export function isSteamSnapshot(value: unknown): value is SteamRatingsMap {
     && raw.url === `https://store.steampowered.com/app/${raw.steam_id}/`
     && typeof raw.matched_title === 'string' && raw.matched_title.trim().length > 0
     && (raw.last_updated === undefined || typeof raw.last_updated === 'string')
+    && (raw.review_attempted_at === undefined || typeof raw.review_attempted_at === 'string')
     && (raw.tags_updated_at === undefined || typeof raw.tags_updated_at === 'string')
     && (raw.tags === undefined || (Array.isArray(raw.tags)
       && raw.tags.length <= 30

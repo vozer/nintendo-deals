@@ -104,6 +104,7 @@ export interface SteamRating {
   matched_title: string;
   tags?: string[];
   last_updated?: string;
+  review_attempted_at?: string;
   tags_updated_at?: string;
 }
 

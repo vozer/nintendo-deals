@@ -22,8 +22,12 @@ describe('enrichment snapshot validation', () => {
     } })).toBe(true);
     expect(isSteamSnapshot({ '1001': {
       steam_id: 10, score_pct: 90, votes: 10, url: 'https://store.steampowered.com/app/10/',
-      matched_title: 'Game', tags: ['Adventure'],
+      matched_title: 'Game', tags: ['Adventure'], review_attempted_at: '2026-10-26T00:00:00Z',
     } })).toBe(true);
+    expect(isSteamSnapshot({ '1001': {
+      steam_id: 10, score_pct: 90, votes: 10, url: 'https://store.steampowered.com/app/10/',
+      matched_title: 'Game', review_attempted_at: 123,
+    } })).toBe(false);
   });
 
   it('rejects empty, malformed, or out-of-range snapshots before publication', () => {

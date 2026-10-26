@@ -42,6 +42,20 @@ jobs:
             echo "dry_run=0" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Refresh stale Steam review scores
+        id: steam_refresh
+        if: github.event_name == 'schedule'
+        continue-on-error: true
+        env:
+          NINTENDO_DEALS_BASE_URL: ${{ vars.NINTENDO_DEALS_BASE_URL }}
+          RATINGS_API_KEY: ${{ secrets.RATINGS_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${NINTENDO_DEALS_BASE_URL:?NINTENDO_DEALS_BASE_URL repository variable is required}"
+          : "${RATINGS_API_KEY:?RATINGS_API_KEY secret is required to publish}"
+          python scripts/steam-backfill.py --base-url "$NINTENDO_DEALS_BASE_URL" --refresh-existing --limit 50 --apply
+
       - name: Refresh Nintendo Life eShop Selects
         id: curation
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
@@ -82,6 +96,7 @@ jobs:
       - name: Finalize run evidence
         if: always()
         env:
+          STEAM_REFRESH_OUTCOME: ${{ steps.steam_refresh.outcome }}
           CURATION_OUTCOME: ${{ steps.curation.outcome }}
           WORKER_OUTCOME: ${{ steps.worker.outcome }}
           NINTENDO_DEALS_EVIDENCE_DIR: run-evidence

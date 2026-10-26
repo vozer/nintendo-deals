@@ -1,6 +1,7 @@
 import argparse
 import urllib.request
 import urllib.parse
+import urllib.error
 import json
 import time
 import re
@@ -8,13 +9,15 @@ import os
 import sys
 import unicodedata
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from automation.content_policy import MAX_DISCOUNTED_PRICE_EUR, ORIGINAL_SWITCH_FILTER, is_original_switch_game
 
 API_KEY = os.environ.get('RATINGS_API_KEY', '')
+STEAM_REVIEW_REFRESH_DAYS = 30
+STEAM_REVIEW_RETRY_DAYS = 7
 
 
 def normalize(value):
@@ -110,22 +113,98 @@ def get_steamspy_tags(appid):
 
 
 def get_steam_review_stats(appid):
+    params = {
+        'appid': int(appid),
+        'languages': ['english'],
+        'review_type': 0,
+        'purchase_type': 0,
+    }
+    query = urllib.parse.urlencode({'input_json': json.dumps(params, separators=(',', ':'))})
+    api_url = f"https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/?{query}"
+    request = urllib.request.Request(api_url, headers={'User-Agent': 'NintendoDeals/1.0'})
     try:
-        api_url = f"https://store.steampowered.com/appreviews/{appid}?json=1&language=all&purchase_type=all"
-        req2 = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req2, timeout=10) as res2:
-            data = json.loads(res2.read())
-            s = data.get('query_summary', {})
-            if data.get('success') != 1:
-                return None, None
-            total = int(s.get('total_positive', 0)) + int(s.get('total_negative', 0))
-            if total > 0:
-                pct = round(int(s['total_positive']) / total * 100)
-                return pct, total
-    except Exception:
-        pass
+        with urllib.request.urlopen(request, timeout=15) as response:
+            data = json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(f"Valve review API returned HTTP {error.code}") from None
+    except Exception as error:
+        raise RuntimeError(f"Valve review API unavailable ({type(error).__name__})") from None
 
-    return None, None
+    summary = data.get('response', {}).get('query_summary') if isinstance(data, dict) else None
+    if not isinstance(summary, dict):
+        raise RuntimeError('Valve review API returned no query summary')
+    try:
+        positive = int(summary['total_positive'])
+        negative = int(summary['total_negative'])
+    except (KeyError, TypeError, ValueError):
+        raise RuntimeError('Valve review API returned invalid review totals') from None
+    total = positive + negative
+    if total <= 0:
+        return None, None
+    return positive * 100 // total, total
+
+
+def _parse_timestamp(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+
+
+def refresh_existing_reviews(existing, limit=25, game_id=None, now=None):
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    stamp = now.astimezone(timezone.utc).isoformat()
+    stale_before = now - timedelta(days=STEAM_REVIEW_REFRESH_DAYS)
+    retry_before = now - timedelta(days=STEAM_REVIEW_RETRY_DAYS)
+    due = []
+    for fs_id, entry in existing.items():
+        if (game_id and fs_id != game_id) or not isinstance(entry, dict):
+            continue
+        appid = entry.get('steam_id')
+        if not str(appid or '').isdigit():
+            continue
+        updated_at = _parse_timestamp(entry.get('last_updated'))
+        attempted_at = _parse_timestamp(entry.get('review_attempted_at'))
+        if updated_at is not None and updated_at > stale_before:
+            continue
+        if attempted_at is not None and attempted_at > retry_before:
+            continue
+        due.append((attempted_at or updated_at or datetime.min.replace(tzinfo=timezone.utc), fs_id, entry))
+
+    due.sort(key=lambda item: (item[0], item[1]))
+    selected = due[:limit]
+    summary = {'eligible': len(due), 'selected': len(selected), 'updated': 0, 'failed': 0, 'empty': 0}
+    for index, (_, fs_id, entry) in enumerate(selected, start=1):
+        title = entry.get('matched_title') or fs_id
+        entry['review_attempted_at'] = stamp
+        try:
+            score, votes = get_steam_review_stats(entry['steam_id'])
+        except Exception as error:
+            summary['failed'] += 1
+            reason = (
+                str(error).replace('\r', ' ').replace('\n', ' ')[:160]
+                if isinstance(error, RuntimeError) else type(error).__name__
+            )
+            print(f"[{index}/{len(selected)}] {title} (Nintendo ID {fs_id}): review refresh failed ({reason})",
+                  file=sys.stderr)
+        else:
+            if score is None or votes is None:
+                summary['empty'] += 1
+                print(f"[{index}/{len(selected)}] {title} (Nintendo ID {fs_id}): no review totals; kept cached score")
+            else:
+                entry['score_pct'] = score
+                entry['votes'] = votes
+                entry['last_updated'] = stamp
+                summary['updated'] += 1
+                print(f"[{index}/{len(selected)}] {title} -> {score}% ({votes} reviews)")
+        if index < len(selected):
+            time.sleep(1.0)
+    return summary
 
 
 def backfill_tags(base_url, apply, api_key, limit=25, game_id=None):
@@ -213,10 +292,11 @@ def main(argv=None):
     parser.add_argument('--base-url', help='Explicit Nintendo Deals API target; required with --apply')
     parser.add_argument('--apply', action='store_true', help='Save the staged snapshot; default is dry-run')
     parser.add_argument('--tags-only', action='store_true', help='Only fill missing SteamSpy tags')
+    parser.add_argument('--refresh-existing', action='store_true', help='Refresh stale review scores for existing Steam matches')
     parser.add_argument('--limit', type=int, default=25, help='Maximum missing games to inspect (1-100)')
     parser.add_argument('--game-id', help='Only inspect this Nintendo ID')
     args = parser.parse_args(argv)
-    if not 1 <= args.limit <= 100 or (args.game_id and not args.game_id.isdigit()):
+    if not 1 <= args.limit <= 100 or (args.game_id and not args.game_id.isdigit()) or (args.tags_only and args.refresh_existing):
         parser.error('invalid --limit or --game-id')
     if args.apply and not args.base_url:
         parser.error('--apply requires an explicit --base-url target')
@@ -230,6 +310,23 @@ def main(argv=None):
         backfill_tags(base_url, args.apply, API_KEY, args.limit, args.game_id)
         return
 
+    if args.refresh_existing:
+        request = urllib.request.Request(f"{base_url}/api/steam", method='GET')
+        with urllib.request.urlopen(request, timeout=30) as response:
+            existing = json.loads(response.read())
+            revision = response.headers.get('ETag')
+        if not isinstance(existing, dict):
+            raise RuntimeError("Steam API returned an invalid snapshot")
+        summary = refresh_existing_reviews(existing, args.limit, args.game_id)
+        print("Steam review refresh: " + ", ".join(f"{key}={value}" for key, value in summary.items()))
+        if args.apply and summary['selected']:
+            print('Published:', save_snapshot(base_url, API_KEY, existing, revision))
+        elif args.apply:
+            print("No stale ratings to save.")
+        else:
+            print("DRY RUN: no API writes performed.")
+        return
+
     request = urllib.request.Request(f"{base_url}/api/steam", method='GET')
     with urllib.request.urlopen(request, timeout=30) as response:
         existing = json.loads(response.read())
@@ -237,7 +334,7 @@ def main(argv=None):
     if not isinstance(existing, dict):
         raise RuntimeError("Steam API returned an invalid snapshot")
     games = fetch_games()
-    updates = skipped = not_found = 0
+    updates = skipped = not_found = review_failures = 0
 
     games = [game for game in games if str(game['fs_id']) not in existing and (not args.game_id or str(game['fs_id']) == args.game_id)][:args.limit]
 
@@ -250,7 +347,18 @@ def main(argv=None):
         details = get_validated_steam_details(game)
         appid = details.get('steam_appid') if details else None
         if appid:
-            score, votes = get_steam_review_stats(appid)
+            try:
+                score, votes = get_steam_review_stats(appid)
+            except Exception as error:
+                review_failures += 1
+                reason = (
+                    str(error).replace('\r', ' ').replace('\n', ' ')[:160]
+                    if isinstance(error, RuntimeError) else type(error).__name__
+                )
+                print(f"[{index + 1}/{len(games)}] {title}: review lookup failed ({reason})",
+                      file=sys.stderr)
+                time.sleep(1.0)
+                continue
             tags = get_steamspy_tags(appid)
             if score is not None:
                 existing[fs_id] = {
@@ -269,7 +377,7 @@ def main(argv=None):
             not_found += 1
             time.sleep(0.5)
 
-    print(f"Steam snapshot: {updates} new, {skipped} existing, {not_found} unmatched; total {len(existing)}")
+    print(f"Steam snapshot: {updates} new, {skipped} existing, {not_found} unmatched, {review_failures} review failures; total {len(existing)}")
     if args.apply and updates:
         print('Published:', save_snapshot(base_url, API_KEY, existing, revision))
     else:

@@ -21,6 +21,10 @@ class FinalizeDailyRunTests(unittest.TestCase):
         self.assertEqual(FINALIZER.workflow_status(["success", "success"], {"igdb_game_errors": 1}), "partial")
         self.assertEqual(FINALIZER.workflow_status(["success", "success"], {}), "success")
         self.assertEqual(FINALIZER.workflow_status(["failure", "success"], {"igdb_game_errors": 1}), "failure")
+        self.assertEqual(
+            FINALIZER.workflow_status(["success", "success"], {}, steam_refresh_failed=True),
+            "partial",
+        )
 
     def test_failure_to_persist_permanent_evidence_fails_the_finalizer(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -38,6 +42,36 @@ class FinalizeDailyRunTests(unittest.TestCase):
             evidence = json.loads((root / "workflow-run.json").read_text(encoding="utf-8"))
             self.assertFalse(evidence["permanent_archive_saved"])
             self.assertFalse(evidence["permanent_audit_saved"])
+
+    def test_nonblocking_steam_step_failure_is_permanently_recorded_as_partial(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "evidence"
+            summary_path = Path(directory) / "step-summary.md"
+            env = {
+                "NINTENDO_DEALS_EVIDENCE_DIR": str(root), "CURATION_OUTCOME": "success",
+                "WORKER_OUTCOME": "success", "STEAM_REFRESH_OUTCOME": "failure",
+                "RUN_ID": "123456", "RUN_ATTEMPT": "1", "COMMIT_SHA": "abc123",
+                "EVENT_NAME": "schedule", "DRY_RUN": "0",
+                "API_BASE_URL": "https://nintendo-deals.test", "RATINGS_API_KEY": "synthetic-secret",
+                "GITHUB_STEP_SUMMARY": str(summary_path),
+            }
+            requests = []
+
+            def send(request, timeout):
+                requests.append(request)
+                return io.BytesIO(b'{"stored":true}')
+
+            with patch.dict(os.environ, env), patch("urllib.request.urlopen", side_effect=send):
+                FINALIZER.main()
+
+            evidence = json.loads((root / "workflow-run.json").read_text(encoding="utf-8"))
+            self.assertEqual(evidence["status"], "partial")
+            self.assertEqual(evidence["failure_stage"], "steam_review_refresh")
+            self.assertEqual(evidence["failure_type"], "SteamReviewRefreshStepFailure")
+            self.assertEqual(evidence["step_outcomes"]["steam_refresh"], "failure")
+            request_event = json.loads(requests[1].data)
+            self.assertEqual(request_event["response"]["step_outcomes"]["steam_refresh"], "failure")
+            self.assertIn("Steam review refresh step: `failure`", summary_path.read_text(encoding="utf-8"))
 
     def test_creates_redacted_manifest_and_permanent_correlated_audit(self):
         with tempfile.TemporaryDirectory() as directory:

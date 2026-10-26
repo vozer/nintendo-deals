@@ -10,6 +10,7 @@ on:
         options:
           - ntdeals
           - steam
+          - steam-refresh
           - media
       dry_run:
         description: Read and calculate only; do not publish a snapshot
@@ -67,15 +68,16 @@ jobs:
           script=""
           case "$OPERATION" in
             ntdeals) script="scripts/scrape-ntdeals.py" ;;
-            steam) script="scripts/steam-backfill.py" ;;
+            steam|steam-refresh) script="scripts/steam-backfill.py" ;;
             media) script="scripts/media-backfill.py" ;;
             *) echo "Unsupported maintenance operation" >&2; exit 2 ;;
           esac
           args=(--base-url "$NINTENDO_DEALS_BASE_URL")
-          if [[ "$OPERATION" == "steam" || "$OPERATION" == "media" ]]; then
+          if [[ "$OPERATION" == "steam" || "$OPERATION" == "steam-refresh" || "$OPERATION" == "media" ]]; then
             args+=(--limit "$LIMIT")
             if [[ -n "$GAME_ID" ]]; then args+=(--game-id "$GAME_ID"); fi
           fi
+          if [[ "$OPERATION" == "steam-refresh" ]]; then args+=(--refresh-existing); fi
           if [[ "$OPERATION" == "media" && "$REFRESH_INCOMPLETE" == "true" ]]; then args+=(--refresh-incomplete); fi
           if [[ "$DRY_RUN" != "true" ]]; then
             : "${RATINGS_API_KEY:?RATINGS_API_KEY secret is required to publish}"
