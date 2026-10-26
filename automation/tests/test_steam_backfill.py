@@ -81,6 +81,7 @@ class SteamBackfillTests(unittest.TestCase):
                   "last_updated": "2026-10-25T00:00:00+00:00"},
             "5": {"steam_id": 55, "score_pct": 50, "votes": 50,
                   "review_attempted_at": "2026-10-25T00:00:00+00:00"},
+            "test_entry": {"steam_id": 99, "score_pct": 70, "votes": 20},
         }
         now = datetime(2026, 10, 26, tzinfo=timezone.utc)
 
@@ -103,13 +104,14 @@ class SteamBackfillTests(unittest.TestCase):
         self.assertNotIn("review_attempted_at", existing["3"])
         self.assertEqual(existing["4"]["score_pct"], 85)
         self.assertEqual(existing["5"]["score_pct"], 50)
+        self.assertNotIn("review_attempted_at", existing["test_entry"])
 
     def test_refresh_cli_uses_snapshot_and_conditional_save_without_catalog_fetch(self):
         snapshot = {"1": {
             "steam_id": 11, "score_pct": 70, "votes": 100, "matched_title": "One",
             "url": "https://store.steampowered.com/app/11/", "last_updated": "2026-08-01T00:00:00+00:00",
             "tags": ["Adventure"],
-        }}
+        }, "test_entry": {"steam_id": 99, "score_pct": 70, "votes": 20}}
         response = BytesIO(json.dumps(snapshot).encode())
         response.headers = {"ETag": '"synthetic-revision"'}
 
@@ -125,6 +127,7 @@ class SteamBackfillTests(unittest.TestCase):
         self.assertEqual(save.call_args.args[:2], ("https://app.test", "synthetic-key"))
         self.assertEqual(save.call_args.args[3], '"synthetic-revision"')
         saved_snapshot = save.call_args.args[2]
+        self.assertEqual(set(saved_snapshot), {"1"})
         self.assertEqual(saved_snapshot["1"]["score_pct"], 91)
         self.assertEqual(saved_snapshot["1"]["tags"], ["Adventure"])
 

@@ -163,7 +163,8 @@ def refresh_existing_reviews(existing, limit=25, game_id=None, now=None):
     retry_before = now - timedelta(days=STEAM_REVIEW_RETRY_DAYS)
     due = []
     for fs_id, entry in existing.items():
-        if (game_id and fs_id != game_id) or not isinstance(entry, dict):
+        if (not fs_id.isdigit() or len(fs_id) > 20 or (game_id and fs_id != game_id)
+                or not isinstance(entry, dict)):
             continue
         appid = entry.get('steam_id')
         if not str(appid or '').isdigit():
@@ -317,10 +318,13 @@ def main(argv=None):
             revision = response.headers.get('ETag')
         if not isinstance(existing, dict):
             raise RuntimeError("Steam API returned an invalid snapshot")
+        before = {fs_id: entry.copy() for fs_id, entry in existing.items() if isinstance(entry, dict)}
         summary = refresh_existing_reviews(existing, args.limit, args.game_id)
+        updates = {fs_id: entry for fs_id, entry in existing.items()
+                   if fs_id in before and entry != before[fs_id]}
         print("Steam review refresh: " + ", ".join(f"{key}={value}" for key, value in summary.items()))
-        if args.apply and summary['selected']:
-            print('Published:', save_snapshot(base_url, API_KEY, existing, revision))
+        if args.apply and updates:
+            print('Published:', save_snapshot(base_url, API_KEY, updates, revision))
         elif args.apply:
             print("No stale ratings to save.")
         else:
