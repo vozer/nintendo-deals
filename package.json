@@ -17,7 +17,7 @@
   "dependencies": {
     "@vercel/blob": "2.8.0",
     "hls.js": "1.7.3",
-    "next": "16.3.6",
+    "next": "16.4.1",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
@@ -29,9 +29,13 @@
     "@types/react-dom": "19.3.0",
     "axe-core": "4.13.0",
     "eslint": "9.39.5",
-    "eslint-config-next": "16.3.6",
+    "eslint-config-next": "16.4.1",
     "tailwindcss": "4.3.3",
     "typescript": "6.0.3",
-    "vitest": "5.0.2"
+    "vitest": "5.0.3"
+  },
+  "overrides": {
+    "source-map-js": "1.2.2",
+    "undici": "6.29.1"
   }
 }

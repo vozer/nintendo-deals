@@ -55,6 +55,7 @@ FR-012/014 are deployed. Production run `38812359994` exposed a legacy eligibili
 | NFR-012 | Session Protection | Browser authentication must use an expiring signed session rather than storing the access password, and login attempts must be bounded per client within a time window. | Security | High | Verified |
 | NFR-013 | Durable Crawler Recovery | Each media-game result must be committed to a local run checkpoint before it is reported as processed; resuming the same run must reuse committed results and expose partial provider failures without silently discarding them. A provider exception is recorded against its game and must not stop later games. Publication requires a matching previously staged manifest and a checkpoint with no pending or incomplete results. | Availability | High | Verified |
 | NFR-014 | Permanent Telegram Audit | Every accepted inbound Telegram update and outbound Telegram Bot API request has a private immutable audit record with request/result or explicit unknown outcome. Records have no TTL and are retrievable only by an authorized API-key caller using bounded pagination. Credentials and webhook secrets must never be stored. | Security | High | Implemented |
+| NFR-015 | Dependency Security | Use fixed releases for vulnerable production and build dependencies when compatible fixes exist, and keep manifests and lockfiles aligned. | Security | High | In Progress |
 
 ## Constraints
 
