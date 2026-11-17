@@ -57,6 +57,8 @@ FR-012/014 are deployed. Production run `38812359994` exposed a legacy eligibili
 | NFR-014 | Permanent Telegram Audit | Every accepted inbound Telegram update and outbound Telegram Bot API request has a private immutable audit record with request/result or explicit unknown outcome. Records have no TTL and are retrievable only by an authorized API-key caller using bounded pagination. Credentials and webhook secrets must never be stored. | Security | High | Implemented |
 | NFR-015 | Dependency Security | Use fixed releases for vulnerable production and build dependencies when compatible fixes exist, and keep manifests and lockfiles aligned. | Security | High | In Progress |
 
+The Next.js runtime must include the fix for CVE-2026-119790.
+
 ## Constraints
 
 | ID | Title | Constraint | Category | Priority | Status |
